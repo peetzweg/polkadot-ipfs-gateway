@@ -1,31 +1,30 @@
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
+import cors from "@fastify/cors";
+import type { Helia } from "@helia/interface";
+import { unixfs } from "@helia/unixfs";
 import { identify } from "@libp2p/identify";
 import { kadDHT } from "@libp2p/kad-dht";
 import { tcp } from "@libp2p/tcp";
 import { webSockets } from "@libp2p/websockets";
-import { createHelia } from "helia";
-import type { Helia } from "@helia/interface";
-import { createLibp2p } from "libp2p";
+import { blake2b256 } from "@multiformats/blake2/blake2b";
 import { multiaddr } from "@multiformats/multiaddr";
 import { FsBlockstore } from "blockstore-fs";
-import { CID } from "multiformats/cid";
-import { blake2b256 } from "@multiformats/blake2/blake2b";
 import Fastify from "fastify";
-import cors from "@fastify/cors";
-import { unixfs } from "@helia/unixfs";
-import type { UnixFS } from "@helia/unixfs";
-import {
-  SERVER_CONFIG,
-  PEER_CONFIG,
-  DHT_PROTOCOL,
-  BLOCKSTORE_CONFIG,
-} from "./config.js";
-import { fromString as uint8ArrayFromString } from "uint8arrays/from-string";
-import { promises as fsPromises } from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import type { Dirent } from "fs";
+import { promises as fsPromises } from "fs";
+import { createHelia } from "helia";
+import { createLibp2p } from "libp2p";
+import { CID } from "multiformats/cid";
+import path from "path";
+import { fromString as uint8ArrayFromString } from "uint8arrays/from-string";
+import { fileURLToPath } from "url";
+import {
+  BLOCKSTORE_CONFIG,
+  DHT_PROTOCOL,
+  PEER_CONFIG,
+  SERVER_CONFIG,
+} from "./config.js";
 
 // Get the directory name in ESM
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
