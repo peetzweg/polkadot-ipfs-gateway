@@ -13,6 +13,8 @@ import { CID } from "multiformats/cid";
 import { blake2b256 } from "@multiformats/blake2/blake2b";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import { unixfs } from "@helia/unixfs";
+import type { UnixFS } from "@helia/unixfs";
 import {
   SERVER_CONFIG,
   PEER_CONFIG,
@@ -20,9 +22,10 @@ import {
   BLOCKSTORE_CONFIG,
 } from "./config.js";
 import { fromString as uint8ArrayFromString } from "uint8arrays/from-string";
-import { promises as fs } from "fs";
+import { promises as fsPromises } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import type { Dirent } from "fs";
 
 // Get the directory name in ESM
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -40,19 +43,22 @@ await fastify.register(cors, {
 // Function to load and add fixture files to Helia
 async function loadFixtures(helia: Helia) {
   const fixturesDir = path.join(__dirname, "..", "fixtures");
+  const unixFS = unixfs(helia);
 
   try {
-    const entries = await fs.readdir(fixturesDir, { withFileTypes: true });
+    const entries = await fsPromises.readdir(fixturesDir, {
+      withFileTypes: true,
+    });
 
     console.log("\nLoading fixture files and directories:");
     console.log("==================================");
 
     // Process files first
-    const files = entries.filter((entry) => entry.isFile());
+    const files = entries.filter((entry: Dirent) => entry.isFile());
     for (const file of files) {
       try {
         const filePath = path.join(fixturesDir, file.name);
-        const content = await fs.readFile(filePath);
+        const content = await fsPromises.readFile(filePath);
         const contentBuffer = new TextEncoder().encode(content.toString());
         let codec: number;
 
@@ -78,46 +84,41 @@ async function loadFixtures(helia: Helia) {
       }
     }
 
-    // Process directories
-    const directories = entries.filter((entry) => entry.isDirectory());
+    // Process directories using UnixFS
+    const directories = entries.filter((entry: Dirent) => entry.isDirectory());
     for (const dir of directories) {
       try {
         const dirPath = path.join(fixturesDir, dir.name);
 
-        // Read all files in the directory
-        const dirContents = await fs.readdir(dirPath);
-        const dirFiles = await Promise.all(
+        // Read directory contents
+        const dirContents = await fsPromises.readdir(dirPath);
+        const files = await Promise.all(
           dirContents.map(async (fileName) => {
             const filePath = path.join(dirPath, fileName);
-            const content = await fs.readFile(filePath);
+            const content = await fsPromises.readFile(filePath);
             return {
-              name: fileName,
+              path: path.join(dir.name, fileName),
               content: content,
             };
           })
         );
 
-        // Create a buffer containing directory contents
-        const dirBuffer = new TextEncoder().encode(
-          JSON.stringify({
-            name: dir.name,
-            files: dirFiles.map((f) => ({
-              name: f.name,
-              size: f.content.length,
-            })),
-          })
-        );
+        // Add directory and its contents to UnixFS
+        let lastCID;
+        for await (const entry of unixFS.addAll(files)) {
+          lastCID = entry.cid;
+        }
 
-        // Create CID with blake2b-256 and dag-pb codec
-        const hash = await blake2b256.digest(dirBuffer);
-        const cid = CID.createV1(0x0070, hash);
+        if (lastCID) {
+          // List all files in the directory
+          for await (const file of unixFS.ls(lastCID)) {
+            console.log(`    - ${file.name} (${file.cid.toString()})`);
+          }
 
-        // Add the directory metadata to blockstore
-        await helia.blockstore.put(cid, dirBuffer);
-
-        console.log(
-          `  ✓ Added directory ${dir.name} with CID: ${cid.toString()}`
-        );
+          console.log(
+            `  ✓ Added directory ${dir.name} with CID: ${lastCID.toString()}`
+          );
+        }
       } catch (err: any) {
         console.error(`  ✗ Failed to add directory ${dir.name}:`, err.message);
       }
@@ -286,6 +287,128 @@ fastify.get("/ipfs/:cid", async (request, reply) => {
   } catch (err: any) {
     reply.code(404);
     return { error: `Block not found: ${err.message}` };
+  }
+});
+
+// Define route to get a specific file from a UnixFS directory by index
+fastify.get<{
+  Params: { cid: string; index: string };
+}>("/ipfs/:cid/:index", async (request, reply) => {
+  const { cid, index } = request.params;
+  const idx = parseInt(index, 10);
+
+  try {
+    // Ensure connection to bootnode before proceeding
+    const bootnode = multiaddr(PEER_CONFIG.BOOTNODE);
+    const bootnodePeerId = bootnode.getPeerId();
+
+    if (bootnodePeerId) {
+      const peers = Array.from(heliaNode.libp2p.getPeers());
+      const isConnected = peers.some(
+        (peer) => peer.toString() === bootnodePeerId
+      );
+
+      if (!isConnected) {
+        console.log("Bootnode connection lost, reconnecting...");
+        try {
+          await heliaNode.libp2p.dial(bootnode);
+          await heliaNode.libp2p.services.dht.getClosestPeers(
+            uint8ArrayFromString(bootnodePeerId)
+          );
+          console.log("Successfully reconnected to bootnode!");
+        } catch (dialErr) {
+          console.error("Failed to reconnect to bootnode:", dialErr);
+          reply.code(503);
+          return {
+            error: "Gateway is currently unable to connect to the network",
+          };
+        }
+      }
+    }
+
+    // Parse and validate the CID
+    const parsedCid = CID.parse(cid);
+
+    // Create UnixFS instance
+    const fs = unixfs(heliaNode);
+
+    // Get directory listing
+    const entries = [];
+    try {
+      for await (const entry of fs.ls(parsedCid)) {
+        entries.push(entry);
+      }
+    } catch (err: any) {
+      reply.code(400);
+      return { error: "The provided CID is not a UnixFS directory" };
+    }
+
+    // Validate index
+    if (isNaN(idx) || idx < 0 || idx >= entries.length) {
+      reply.code(400);
+      return {
+        error: "Invalid index",
+        total_files: entries.length,
+        available_indices: entries.map((e, i) => ({
+          index: i,
+          name: e.name,
+          cid: e.cid.toString(),
+        })),
+      };
+    }
+
+    // Get the entry at the specified index
+    const targetEntry = entries[idx];
+
+    // Get the content of the file
+    const chunks = [];
+    for await (const chunk of fs.cat(targetEntry.cid)) {
+      chunks.push(chunk);
+    }
+    const content = new Uint8Array(
+      chunks.reduce((acc, chunk) => acc + chunk.length, 0)
+    );
+    let offset = 0;
+    for (const chunk of chunks) {
+      content.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    // Try to determine content type
+    const fileName = targetEntry.name.toLowerCase();
+    if (fileName.endsWith(".json")) {
+      reply.header("Content-Type", "application/json");
+      try {
+        const text = new TextDecoder().decode(content);
+        return JSON.parse(text);
+      } catch {
+        // If JSON parsing fails, return as binary
+        reply.header("Content-Type", "application/octet-stream");
+        return content;
+      }
+    } else if (fileName.endsWith(".js")) {
+      reply.header("Content-Type", "text/javascript");
+      return new TextDecoder().decode(content);
+    } else if (fileName.endsWith(".png")) {
+      reply.header("Content-Type", "image/png");
+      return content;
+    } else if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) {
+      reply.header("Content-Type", "image/jpeg");
+      return content;
+    } else {
+      // Try to decode as text, fallback to binary
+      try {
+        const text = new TextDecoder().decode(content);
+        reply.header("Content-Type", "text/plain");
+        return text;
+      } catch {
+        reply.header("Content-Type", "application/octet-stream");
+        return content;
+      }
+    }
+  } catch (err: any) {
+    reply.code(404);
+    return { error: `File not found: ${err.message}` };
   }
 });
 
