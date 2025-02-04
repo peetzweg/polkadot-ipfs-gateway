@@ -42,28 +42,84 @@ async function loadFixtures(helia: Helia) {
   const fixturesDir = path.join(__dirname, "..", "fixtures");
 
   try {
-    const files = await fs.readdir(fixturesDir);
-    const jsonFiles = files.filter((file) => file.endsWith(".json"));
+    const entries = await fs.readdir(fixturesDir, { withFileTypes: true });
 
-    console.log("\nLoading fixture files:");
+    console.log("\nLoading fixture files and directories:");
     console.log("==================================");
 
-    for (const file of jsonFiles) {
+    // Process files first
+    const files = entries.filter((entry) => entry.isFile());
+    for (const file of files) {
       try {
-        const filePath = path.join(fixturesDir, file);
-        const content = await fs.readFile(filePath, "utf8");
-        const contentBuffer = new TextEncoder().encode(content);
+        const filePath = path.join(fixturesDir, file.name);
+        const content = await fs.readFile(filePath);
+        const contentBuffer = new TextEncoder().encode(content.toString());
+        let codec: number;
 
-        // Create CID with blake2b-256 and json codec (0x0200)
+        // Determine codec based on file extension
+        if (file.name.endsWith(".json")) {
+          codec = 0x0200; // json codec
+        } else if (file.name.endsWith(".js")) {
+          codec = 0x0055; // raw codec
+        } else {
+          continue; // Skip other file types
+        }
+
+        // Create CID with blake2b-256 and appropriate codec
         const hash = await blake2b256.digest(contentBuffer);
-        const cid = CID.createV1(0x0200, hash);
+        const cid = CID.createV1(codec, hash);
 
         // Add the content to blockstore
         await helia.blockstore.put(cid, contentBuffer);
 
-        console.log(`  ✓ Added ${file} with CID: ${cid.toString()}`);
+        console.log(`  ✓ Added file ${file.name} with CID: ${cid.toString()}`);
       } catch (err: any) {
-        console.error(`  ✗ Failed to add ${file}:`, err.message);
+        console.error(`  ✗ Failed to add file ${file.name}:`, err.message);
+      }
+    }
+
+    // Process directories
+    const directories = entries.filter((entry) => entry.isDirectory());
+    for (const dir of directories) {
+      try {
+        const dirPath = path.join(fixturesDir, dir.name);
+
+        // Read all files in the directory
+        const dirContents = await fs.readdir(dirPath);
+        const dirFiles = await Promise.all(
+          dirContents.map(async (fileName) => {
+            const filePath = path.join(dirPath, fileName);
+            const content = await fs.readFile(filePath);
+            return {
+              name: fileName,
+              content: content,
+            };
+          })
+        );
+
+        // Create a buffer containing directory contents
+        const dirBuffer = new TextEncoder().encode(
+          JSON.stringify({
+            name: dir.name,
+            files: dirFiles.map((f) => ({
+              name: f.name,
+              size: f.content.length,
+            })),
+          })
+        );
+
+        // Create CID with blake2b-256 and dag-pb codec
+        const hash = await blake2b256.digest(dirBuffer);
+        const cid = CID.createV1(0x0070, hash);
+
+        // Add the directory metadata to blockstore
+        await helia.blockstore.put(cid, dirBuffer);
+
+        console.log(
+          `  ✓ Added directory ${dir.name} with CID: ${cid.toString()}`
+        );
+      } catch (err: any) {
+        console.error(`  ✗ Failed to add directory ${dir.name}:`, err.message);
       }
     }
 
