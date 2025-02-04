@@ -5,15 +5,27 @@ import { kadDHT } from "@libp2p/kad-dht";
 import { tcp } from "@libp2p/tcp";
 import { webSockets } from "@libp2p/websockets";
 import { createHelia } from "helia";
+import type { Helia } from "@helia/interface";
 import { createLibp2p } from "libp2p";
 import { multiaddr } from "@multiformats/multiaddr";
-import { MemoryBlockstore } from "blockstore-core";
+import { FsBlockstore } from "blockstore-fs";
 import { CID } from "multiformats/cid";
 import { blake2b256 } from "@multiformats/blake2/blake2b";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
-import { SERVER_CONFIG, PEER_CONFIG, DHT_PROTOCOL } from "./config.js";
+import {
+  SERVER_CONFIG,
+  PEER_CONFIG,
+  DHT_PROTOCOL,
+  BLOCKSTORE_CONFIG,
+} from "./config.js";
 import { fromString as uint8ArrayFromString } from "uint8arrays/from-string";
+import { promises as fs } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+// Get the directory name in ESM
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Create Fastify server
 const fastify = Fastify({
@@ -24,6 +36,42 @@ const fastify = Fastify({
 await fastify.register(cors, {
   origin: true,
 });
+
+// Function to load and add fixture files to Helia
+async function loadFixtures(helia: Helia) {
+  const fixturesDir = path.join(__dirname, "..", "fixtures");
+
+  try {
+    const files = await fs.readdir(fixturesDir);
+    const jsonFiles = files.filter((file) => file.endsWith(".json"));
+
+    console.log("\nLoading fixture files:");
+    console.log("==================================");
+
+    for (const file of jsonFiles) {
+      try {
+        const filePath = path.join(fixturesDir, file);
+        const content = await fs.readFile(filePath, "utf8");
+        const contentBuffer = new TextEncoder().encode(content);
+
+        // Create CID with blake2b-256 and json codec (0x0200)
+        const hash = await blake2b256.digest(contentBuffer);
+        const cid = CID.createV1(0x0200, hash);
+
+        // Add the content to blockstore
+        await helia.blockstore.put(cid, contentBuffer);
+
+        console.log(`  ✓ Added ${file} with CID: ${cid.toString()}`);
+      } catch (err: any) {
+        console.error(`  ✗ Failed to add ${file}:`, err.message);
+      }
+    }
+
+    console.log("==================================\n");
+  } catch (err: any) {
+    console.error("Failed to load fixtures:", err.message);
+  }
+}
 
 // Create a Helia node and ensure connection to bootnode
 async function createNode() {
@@ -40,7 +88,12 @@ async function createNode() {
     },
   });
 
-  const blockstore = new MemoryBlockstore();
+  // Initialize the filesystem blockstore
+  const blockstore = new FsBlockstore(BLOCKSTORE_CONFIG.PATH);
+
+  // Make sure the blockstore is opened before using it
+  await blockstore.open();
+
   const helia = await createHelia({
     libp2p,
     blockstore,
@@ -63,6 +116,9 @@ async function createNode() {
     // Exit if we can't connect to the bootnode
     process.exit(1);
   }
+
+  // Load and add fixture files
+  await loadFixtures(helia);
 
   return helia;
 }
@@ -189,6 +245,8 @@ try {
   console.log(`  Bootnode: ${PEER_CONFIG.BOOTNODE}`);
   console.log("\nDHT Configuration:");
   console.log(`  Protocol: ${DHT_PROTOCOL || "default"}`);
+  console.log("\nBlockstore Configuration:");
+  console.log(`  Path: ${BLOCKSTORE_CONFIG.PATH}`);
   console.log("==================================\n");
 
   await fastify.listen({
@@ -203,17 +261,18 @@ try {
   process.exit(1);
 }
 
-// Handle graceful shutdown
-process.on("SIGTERM", async () => {
+// Graceful shutdown handler
+async function shutdown() {
   console.log("Shutting down...");
+  // Close the blockstore before stopping
+  if (heliaNode?.blockstore && heliaNode.blockstore instanceof FsBlockstore) {
+    await heliaNode.blockstore.close();
+  }
   await heliaNode.stop();
   await fastify.close();
   process.exit(0);
-});
+}
 
-process.on("SIGINT", async () => {
-  console.log("Shutting down...");
-  await heliaNode.stop();
-  await fastify.close();
-  process.exit(0);
-});
+// Handle graceful shutdown for different signals
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

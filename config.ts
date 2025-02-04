@@ -1,5 +1,6 @@
 import { multiaddr } from "@multiformats/multiaddr";
 import dotenv from "dotenv";
+import path from "path";
 
 // Load environment variables from .env file
 dotenv.config();
@@ -29,3 +30,8 @@ try {
 export const DHT_PROTOCOL =
   process.env.DHT_PROTOCOL ||
   "/ddb1e4f77487bc0e05aeb2d3605bd20dfcfd3b6a42cafb718bacbeb0c7a7a60f/kad";
+
+// Blockstore configuration
+export const BLOCKSTORE_CONFIG = {
+  PATH: process.env.BLOCKSTORE_PATH || path.join(process.cwd(), "blocks"),
+};

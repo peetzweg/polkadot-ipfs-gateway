@@ -27,6 +27,7 @@ Configure the gateway through environment variables:
 - `GATEWAY_HOST`: HTTP server host (default: localhost)
 - `BOOTNODE_MULTIADDR`: Multiaddress of the bootnode to connect to
 - `DHT_PROTOCOL`: Custom DHT protocol identifier (defaults to Polkadot-specific value)
+- `BLOCKSTORE_PATH`: Path where IPFS blocks will be stored (default: ./blocks)
 
 ## Usage
 
