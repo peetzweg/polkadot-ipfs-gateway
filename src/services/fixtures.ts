@@ -1,46 +1,31 @@
-import type { Helia } from "@helia/interface";
+import type { Helia } from "helia";
 import { unixfs } from "@helia/unixfs";
 import { blake2b256 } from "@multiformats/blake2/blake2b";
 import { CID } from "multiformats/cid";
 import { promises as fsPromises } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import type { Dirent } from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export class FixturesService {
-  private readonly fixturesDir: string;
+// Function to load and add fixture files to Helia
+export async function loadFixtures(helia: Helia) {
+  const fixturesDir = path.join(__dirname, "..", "..", "..", "fixtures");
+  const unixFS = unixfs(helia);
 
-  constructor() {
-    this.fixturesDir = path.join(__dirname, "..", "..", "fixtures");
-  }
+  try {
+    const entries = await fsPromises.readdir(fixturesDir, {
+      withFileTypes: true,
+    });
 
-  async loadFixtures(helia: Helia) {
-    const unixFS = unixfs(helia);
+    console.log("\nLoading fixture files and directories:");
+    console.log("==================================");
 
-    try {
-      const entries = await fsPromises.readdir(this.fixturesDir, {
-        withFileTypes: true,
-      });
-
-      console.log("\nLoading fixture files and directories:");
-      console.log("==================================");
-
-      await this.processFiles(entries, helia);
-      await this.processDirectories(entries, unixFS);
-
-      console.log("==================================\n");
-    } catch (err: any) {
-      console.error("Failed to load fixtures:", err.message);
-    }
-  }
-
-  private async processFiles(entries: Dirent[], helia: Helia) {
+    // Process files first
     const files = entries.filter((entry) => entry.isFile());
     for (const file of files) {
       try {
-        const filePath = path.join(this.fixturesDir, file.name);
+        const filePath = path.join(fixturesDir, file.name);
         const content = await fsPromises.readFile(filePath);
         const contentBuffer = new TextEncoder().encode(content.toString());
         let codec: number;
@@ -51,7 +36,7 @@ export class FixturesService {
         } else if (file.name.endsWith(".js")) {
           codec = 0x0055; // raw codec
         } else {
-          return; // Skip other file types
+          continue; // Skip other file types
         }
 
         // Create CID with blake2b-256 and appropriate codec
@@ -66,16 +51,12 @@ export class FixturesService {
         console.error(`  ✗ Failed to add file ${file.name}:`, err.message);
       }
     }
-  }
 
-  private async processDirectories(
-    entries: Dirent[],
-    unixFS: ReturnType<typeof unixfs>
-  ) {
+    // Process directories using UnixFS
     const directories = entries.filter((entry) => entry.isDirectory());
     for (const dir of directories) {
       try {
-        const dirPath = path.join(this.fixturesDir, dir.name);
+        const dirPath = path.join(fixturesDir, dir.name);
 
         // Read directory contents
         const dirContents = await fsPromises.readdir(dirPath);
@@ -110,7 +91,9 @@ export class FixturesService {
         console.error(`  ✗ Failed to add directory ${dir.name}:`, err.message);
       }
     }
+
+    console.log("==================================\n");
+  } catch (err: any) {
+    console.error("Failed to load fixtures:", err.message);
   }
 }
-
-export const fixturesService = new FixturesService();
