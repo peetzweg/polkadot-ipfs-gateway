@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "metadata": {
+    "name": "Subscapes",
+    "type": "Procedural",
+    "mime": "text/javascript",
+    "description": "A procedural generation script for creating account-specific landscape designs. This JavaScript code generates unique, abstract landscapes tailored to individual user accounts.",
+    "size": "Fixed",
+    "media": "bafk2bzacearkxglzaee7is3jb7mgyrmgx7hcjkto3qz2jixfqm2uc6rkh3uxu"
+  }
+}

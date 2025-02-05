@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "metadata": {
+    "name": "Sans-Serif Personal Id",
+    "type": "ProceduralPersonal",
+    "mime": "text/javascript",
+    "description": "A procedural generation script for creating personalized text designs. This JavaScript code produces unique, abstract text based on individual user preferences or inputs.",
+    "size": "Fixed",
+    "media": "bafk2bzacecnsiy6bint7esx7slefmfqhdkwscgzrilqvkmptzd52mjheubaym"
+  }
+}

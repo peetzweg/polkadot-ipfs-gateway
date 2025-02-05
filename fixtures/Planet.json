@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "metadata": {
+    "name": "Planet",
+    "type": "Procedural",
+    "mime": "text/javascript",
+    "description": "A procedural generation script for creating unique planet designs. This JavaScript code generates varied planetary bodies with different features and atmospheres.",
+    "size": "Fixed",
+    "media":"bafk2bzaceb4ce5grk676bvpqz3tgiq2vpvhvbp6hhfwscsgygxn3fncfucdg6"
+  }
+}

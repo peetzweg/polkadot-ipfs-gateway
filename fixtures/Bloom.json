@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "metadata": {
+    "name": "Bloom",
+    "type": "Procedural",
+    "mime": "text/javascript",
+    "description": "A procedural generation script for creating bloom or glow effects. This JavaScript code produces radiant, expanding light patterns that can enhance visual designs.",
+    "size": "Fixed",
+    "media": "bafk2bzaceaencldt5dkjgdid336osnecyqkt4dhtekxwd4ermpfwprwcs7jte"
+  }
+}
