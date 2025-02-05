@@ -9,6 +9,9 @@ dotenv.config();
 export const SERVER_CONFIG = {
   PORT: parseInt(process.env.GATEWAY_PORT || "3000", 10),
   HOST: process.env.GATEWAY_HOST || "localhost", // Use "0.0.0.0" to expose to the web
+  ROUTE_PREFIX: process.env.ROUTE_PREFIX
+    ? `/${process.env.ROUTE_PREFIX.replace(/^\/+|\/+$/g, "")}`
+    : "", // Normalize prefix
 };
 
 // Peer configuration

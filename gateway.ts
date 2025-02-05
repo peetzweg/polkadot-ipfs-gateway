@@ -3,7 +3,13 @@ import { createNode, shutdownNode } from "./src/services/helia.js";
 import { loadFixtures } from "./src/services/fixtures.js";
 import { registerIpfsRoutes } from "./src/routes/ipfs.js";
 import { registerHealthRoute } from "./src/routes/health.js";
-import { BLOCKSTORE_CONFIG, DHT_PROTOCOL, PEER_CONFIG } from "./config.js";
+import {
+  BLOCKSTORE_CONFIG,
+  DHT_PROTOCOL,
+  PEER_CONFIG,
+  SERVER_CONFIG,
+} from "./config.js";
+import type { FastifyInstance } from "fastify";
 
 async function main() {
   try {
@@ -11,6 +17,9 @@ async function main() {
     console.log("\nStarting gateway with configuration:");
     console.log("==================================");
     console.log("Server Configuration:");
+    if (SERVER_CONFIG.ROUTE_PREFIX) {
+      console.log(`  Route Prefix: ${SERVER_CONFIG.ROUTE_PREFIX}`);
+    }
     console.log("Peer Configuration:");
     console.log(`  Bootnode: ${PEER_CONFIG.BOOTNODE}`);
     console.log("\nDHT Configuration:");
@@ -28,9 +37,21 @@ async function main() {
     // Create and configure server
     const server = await createServer();
 
-    // Register routes
-    await registerHealthRoute(server, heliaNode);
-    await registerIpfsRoutes(server, heliaNode);
+    // Register routes with prefix if configured
+    if (SERVER_CONFIG.ROUTE_PREFIX) {
+      console.log(`  Route Prefix: ${SERVER_CONFIG.ROUTE_PREFIX}`);
+      await server.register(
+        async (instance: FastifyInstance) => {
+          await registerHealthRoute(instance, heliaNode);
+          await registerIpfsRoutes(instance, heliaNode);
+        },
+        { prefix: SERVER_CONFIG.ROUTE_PREFIX }
+      );
+    } else {
+      // Register routes without prefix
+      await registerHealthRoute(server, heliaNode);
+      await registerIpfsRoutes(server, heliaNode);
+    }
 
     // Start server
     await startServer(server);

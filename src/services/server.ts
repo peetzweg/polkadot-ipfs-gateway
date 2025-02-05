@@ -13,6 +13,18 @@ export async function createServer() {
     origin: true,
   });
 
+  // If a route prefix is configured, register all routes under this prefix
+  if (SERVER_CONFIG.ROUTE_PREFIX) {
+    fastify.register(
+      async (instance) => {
+        // This function will be called with the scoped instance
+        // All routes registered on this instance will have the prefix
+        return instance;
+      },
+      { prefix: SERVER_CONFIG.ROUTE_PREFIX }
+    );
+  }
+
   return fastify;
 }
 
@@ -24,6 +36,9 @@ export async function startServer(fastify: ReturnType<typeof Fastify>) {
     console.log("Server Configuration:");
     console.log(`  Host: ${SERVER_CONFIG.HOST}`);
     console.log(`  Port: ${SERVER_CONFIG.PORT}`);
+    if (SERVER_CONFIG.ROUTE_PREFIX) {
+      console.log(`  Route Prefix: ${SERVER_CONFIG.ROUTE_PREFIX}`);
+    }
     console.log("==================================\n");
 
     await fastify.listen({
@@ -31,7 +46,7 @@ export async function startServer(fastify: ReturnType<typeof Fastify>) {
       host: SERVER_CONFIG.HOST,
     });
     console.log(
-      `Gateway listening on http://${SERVER_CONFIG.HOST}:${SERVER_CONFIG.PORT}`
+      `Gateway listening on http://${SERVER_CONFIG.HOST}:${SERVER_CONFIG.PORT}${SERVER_CONFIG.ROUTE_PREFIX}`
     );
   } catch (err) {
     console.error("Failed to start server:", err);
