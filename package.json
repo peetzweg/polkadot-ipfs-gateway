@@ -18,6 +18,7 @@
     "@helia/interface": "^5.2.0",
     "@helia/unixfs": "^4.0.2",
     "@libp2p/identify": "^3.0.15",
+    "@libp2p/interface": "^2.4.1",
     "@libp2p/interface-libp2p": "^3.2.0",
     "@libp2p/interface-peer-id": "^2.0.2",
     "@libp2p/kad-dht": "^14.2.0",

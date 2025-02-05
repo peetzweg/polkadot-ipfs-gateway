@@ -25,6 +25,7 @@ import {
   PEER_CONFIG,
   SERVER_CONFIG,
 } from "./config.js";
+import { ensureConnection } from "./src/utils/peer.js";
 
 // Get the directory name in ESM
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -225,32 +226,13 @@ fastify.get("/ipfs/:cid", async (request, reply) => {
 
   try {
     // Ensure connection to bootnode before proceeding
-    const bootnode = multiaddr(PEER_CONFIG.BOOTNODE);
-    const bootnodePeerId = bootnode.getPeerId();
-
-    if (bootnodePeerId) {
-      const peers = Array.from(heliaNode.libp2p.getPeers());
-      const isConnected = peers.some(
-        (peer) => peer.toString() === bootnodePeerId
-      );
-
-      if (!isConnected) {
-        console.log("Bootnode connection lost, reconnecting...");
-        try {
-          await heliaNode.libp2p.dial(bootnode);
-          // Add the bootnode to the DHT routing table again
-          await heliaNode.libp2p.services.dht.getClosestPeers(
-            uint8ArrayFromString(bootnodePeerId)
-          );
-          console.log("Successfully reconnected to bootnode!");
-        } catch (dialErr) {
-          console.error("Failed to reconnect to bootnode:", dialErr);
-          reply.code(503);
-          return {
-            error: "Gateway is currently unable to connect to the network",
-          };
-        }
-      }
+    try {
+      await ensureConnection(heliaNode, PEER_CONFIG.BOOTNODE);
+    } catch (err) {
+      reply.code(503);
+      return {
+        error: "Gateway is currently unable to connect to the network",
+      };
     }
 
     // Parse and validate the CID
@@ -298,31 +280,13 @@ fastify.get<{
 
   try {
     // Ensure connection to bootnode before proceeding
-    const bootnode = multiaddr(PEER_CONFIG.BOOTNODE);
-    const bootnodePeerId = bootnode.getPeerId();
-
-    if (bootnodePeerId) {
-      const peers = Array.from(heliaNode.libp2p.getPeers());
-      const isConnected = peers.some(
-        (peer) => peer.toString() === bootnodePeerId
-      );
-
-      if (!isConnected) {
-        console.log("Bootnode connection lost, reconnecting...");
-        try {
-          await heliaNode.libp2p.dial(bootnode);
-          await heliaNode.libp2p.services.dht.getClosestPeers(
-            uint8ArrayFromString(bootnodePeerId)
-          );
-          console.log("Successfully reconnected to bootnode!");
-        } catch (dialErr) {
-          console.error("Failed to reconnect to bootnode:", dialErr);
-          reply.code(503);
-          return {
-            error: "Gateway is currently unable to connect to the network",
-          };
-        }
-      }
+    try {
+      await ensureConnection(heliaNode, PEER_CONFIG.BOOTNODE);
+    } catch (err) {
+      reply.code(503);
+      return {
+        error: "Gateway is currently unable to connect to the network",
+      };
     }
 
     // Parse and validate the CID
