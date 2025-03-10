@@ -98,7 +98,7 @@ export async function registerIpfsRoutes(
       // Fetch the block with timeout
       const block = await withTimeout(
         Promise.resolve(helia.blockstore.get(parsedCid)),
-        3000,
+        30000,
         "Timeout retrieving content"
       );
 
