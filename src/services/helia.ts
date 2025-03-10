@@ -10,9 +10,22 @@ import { FsBlockstore } from "blockstore-fs";
 import { createHelia } from "helia";
 import { createLibp2p } from "libp2p";
 import { BLOCKSTORE_CONFIG, DHT_PROTOCOL, PEER_CONFIG } from "../../config.js";
+import { determineBestKadProtocol } from "../utils/kadUtils.js";
 
 // Create a Helia node and ensure connection to bootnode
 export async function createNode() {
+  // Determine the best KAD protocol to use by checking the bootnode
+  console.log("Determining best KAD protocol to use...");
+  let protocolToUse = DHT_PROTOCOL;
+
+  try {
+    protocolToUse = await determineBestKadProtocol(PEER_CONFIG.BOOTNODE);
+    console.log(`Using KAD protocol: ${protocolToUse}`);
+  } catch (err: any) {
+    console.warn(`Failed to determine optimal KAD protocol: ${err.message}`);
+    console.log(`Falling back to configured protocol: ${DHT_PROTOCOL}`);
+  }
+
   const libp2p = await createLibp2p({
     transports: [webSockets(), tcp()],
     connectionEncrypters: [noise()],
@@ -20,7 +33,7 @@ export async function createNode() {
     services: {
       identify: identify(),
       dht: kadDHT({
-        protocol: DHT_PROTOCOL,
+        protocol: protocolToUse,
         clientMode: true,
       }),
     },

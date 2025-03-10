@@ -37,6 +37,17 @@ export async function registerIpfsRoutes(
       // Fetch the block
       const block = await helia.blockstore.get(parsedCid);
 
+      // Pin the CID to persist it locally
+      try {
+        // Use the built-in pinning system
+        for await (const pinnedCid of helia.pins.add(parsedCid)) {
+          console.log(`Pinned CID: ${pinnedCid.toString()}`);
+        }
+      } catch (pinErr) {
+        console.warn(`Failed to pin CID ${parsedCid.toString()}:`, pinErr);
+        // Continue even if pinning fails - we still want to return the content
+      }
+
       // Check if the codec is dag-json (0x0129) or json (0x0200)
       if (parsedCid.code === 0x0129 || parsedCid.code === 0x0200) {
         try {
@@ -91,6 +102,20 @@ export async function registerIpfsRoutes(
       // Create UnixFS instance
       const fs = unixfs(helia);
 
+      // Pin the directory CID to persist it locally
+      try {
+        // Use the built-in pinning system
+        for await (const pinnedCid of helia.pins.add(parsedCid)) {
+          console.log(`Pinned directory CID: ${pinnedCid.toString()}`);
+        }
+      } catch (pinErr) {
+        console.warn(
+          `Failed to pin directory CID ${parsedCid.toString()}:`,
+          pinErr
+        );
+        // Continue even if pinning fails - we still want to return the content
+      }
+
       // Get directory listing
       const entries: UnixFSEntry[] = [];
       try {
@@ -118,6 +143,22 @@ export async function registerIpfsRoutes(
 
       // Get the entry at the specified index
       const targetEntry = entries[idx];
+
+      // Pin the file CID to persist it locally
+      try {
+        // Use the built-in pinning system
+        for await (const pinnedCid of helia.pins.add(targetEntry.cid)) {
+          console.log(
+            `Pinned file CID: ${pinnedCid.toString()} (${targetEntry.name})`
+          );
+        }
+      } catch (pinErr) {
+        console.warn(
+          `Failed to pin file CID ${targetEntry.cid.toString()}:`,
+          pinErr
+        );
+        // Continue even if pinning fails - we still want to return the content
+      }
 
       // Get the content of the file
       const chunks: Uint8Array[] = [];
