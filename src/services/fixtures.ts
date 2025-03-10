@@ -79,9 +79,9 @@ export async function loadFixtures(helia: Helia) {
 
         if (lastCID) {
           // List all files in the directory
-          for await (const file of unixFS.ls(lastCID)) {
-            console.log(`    - ${file.name} (${file.cid.toString()})`);
-          }
+          // for await (const file of unixFS.ls(lastCID)) {
+          //   console.log(`    - ${file.name} (${file.cid.toString()})`);
+          // }
 
           console.log(
             `  ✓ Added directory ${dir.name} with CID: ${lastCID.toString()}`
