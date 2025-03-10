@@ -12,6 +12,37 @@ type UnixFSEntry = Awaited<ReturnType<UnixFS["ls"]>> extends AsyncIterable<
   ? T
   : never;
 
+async function isLocallyAvailable(helia: Helia, cid: CID): Promise<boolean> {
+  try {
+    await helia.blockstore.get(cid);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function pinIfNew(helia: Helia, cid: CID): Promise<void> {
+  try {
+    // Check if CID is already pinned
+    let isPinned = false;
+    for await (const pinnedCid of helia.pins.ls()) {
+      if (pinnedCid.toString() === cid.toString()) {
+        isPinned = true;
+        break;
+      }
+    }
+
+    // Only pin if not already pinned
+    if (!isPinned) {
+      for await (const pinnedCid of helia.pins.add(cid)) {
+        console.log(`Pinned new CID: ${pinnedCid.toString()}`);
+      }
+    }
+  } catch (pinErr) {
+    console.warn(`Failed to pin CID ${cid.toString()}:`, pinErr);
+  }
+}
+
 export async function registerIpfsRoutes(
   fastify: FastifyInstance,
   helia: Helia
@@ -21,31 +52,30 @@ export async function registerIpfsRoutes(
     const { cid } = request.params as { cid: string };
 
     try {
-      // Ensure connection to bootnode before proceeding
-      try {
-        await ensureConnection(helia, PEER_CONFIG.BOOTNODE);
-      } catch (err) {
-        reply.code(503);
-        return {
-          error: "Gateway is currently unable to connect to the network",
-        };
-      }
-
       // Parse and validate the CID
       const parsedCid = CID.parse(cid);
+
+      // Check if CID is available locally first
+      const isLocal = await isLocallyAvailable(helia, parsedCid);
+
+      if (!isLocal) {
+        // Only connect to bootnode if content is not available locally
+        try {
+          await ensureConnection(helia, PEER_CONFIG.BOOTNODE);
+        } catch (err) {
+          reply.code(503);
+          return {
+            error: "Gateway is currently unable to connect to the network",
+          };
+        }
+      }
 
       // Fetch the block
       const block = await helia.blockstore.get(parsedCid);
 
-      // Pin the CID to persist it locally
-      try {
-        // Use the built-in pinning system
-        for await (const pinnedCid of helia.pins.add(parsedCid)) {
-          console.log(`Pinned CID: ${pinnedCid.toString()}`);
-        }
-      } catch (pinErr) {
-        console.warn(`Failed to pin CID ${parsedCid.toString()}:`, pinErr);
-        // Continue even if pinning fails - we still want to return the content
+      // Only pin if the content was retrieved from the network
+      if (!isLocal) {
+        await pinIfNew(helia, parsedCid);
       }
 
       // Check if the codec is dag-json (0x0129) or json (0x0200)
@@ -86,34 +116,30 @@ export async function registerIpfsRoutes(
     const idx = parseInt(index, 10);
 
     try {
-      // Ensure connection to bootnode before proceeding
-      try {
-        await ensureConnection(helia, PEER_CONFIG.BOOTNODE);
-      } catch (err) {
-        reply.code(503);
-        return {
-          error: "Gateway is currently unable to connect to the network",
-        };
-      }
-
       // Parse and validate the CID
       const parsedCid = CID.parse(cid);
+
+      // Check if directory CID is available locally first
+      const isLocal = await isLocallyAvailable(helia, parsedCid);
+
+      if (!isLocal) {
+        // Only connect to bootnode if content is not available locally
+        try {
+          await ensureConnection(helia, PEER_CONFIG.BOOTNODE);
+        } catch (err) {
+          reply.code(503);
+          return {
+            error: "Gateway is currently unable to connect to the network",
+          };
+        }
+      }
 
       // Create UnixFS instance
       const fs = unixfs(helia);
 
-      // Pin the directory CID to persist it locally
-      try {
-        // Use the built-in pinning system
-        for await (const pinnedCid of helia.pins.add(parsedCid)) {
-          console.log(`Pinned directory CID: ${pinnedCid.toString()}`);
-        }
-      } catch (pinErr) {
-        console.warn(
-          `Failed to pin directory CID ${parsedCid.toString()}:`,
-          pinErr
-        );
-        // Continue even if pinning fails - we still want to return the content
+      // Only pin directory if it was retrieved from the network
+      if (!isLocal) {
+        await pinIfNew(helia, parsedCid);
       }
 
       // Get directory listing
