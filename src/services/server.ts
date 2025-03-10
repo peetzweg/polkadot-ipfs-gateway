@@ -1,5 +1,6 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
+import fastifyCaching from "@fastify/caching";
 import { SERVER_CONFIG } from "../../config.js";
 
 export async function createServer() {
@@ -11,6 +12,12 @@ export async function createServer() {
   // Enable CORS
   await fastify.register(cors, {
     origin: true,
+  });
+
+  // Enable caching
+  await fastify.register(fastifyCaching, {
+    privacy: fastifyCaching.privacy.PUBLIC,
+    expiresIn: 3600, // Cache for 1 hour by default
   });
 
   // If a route prefix is configured, register all routes under this prefix

@@ -70,6 +70,15 @@ export async function registerIpfsRoutes(
         }
       }
 
+      // Set cache headers based on content source
+      if (isLocal) {
+        // Cache locally available content longer since it's more stable
+        reply.header("Cache-Control", "public, max-age=86400"); // 24 hours
+      } else {
+        // Cache network-retrieved content for less time
+        reply.header("Cache-Control", "public, max-age=3600"); // 1 hour
+      }
+
       // Fetch the block
       const block = await helia.blockstore.get(parsedCid);
 
@@ -132,6 +141,15 @@ export async function registerIpfsRoutes(
             error: "Gateway is currently unable to connect to the network",
           };
         }
+      }
+
+      // Set cache headers based on content source
+      if (isLocal) {
+        // Cache locally available content longer since it's more stable
+        reply.header("Cache-Control", "public, max-age=86400"); // 24 hours
+      } else {
+        // Cache network-retrieved content for less time
+        reply.header("Cache-Control", "public, max-age=3600"); // 1 hour
       }
 
       // Create UnixFS instance
