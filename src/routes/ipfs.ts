@@ -12,9 +12,25 @@ type UnixFSEntry = Awaited<ReturnType<UnixFS["ls"]>> extends AsyncIterable<
   ? T
   : never;
 
+// Timeout wrapper for async operations
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorMessage: string
+): Promise<T> {
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]);
+}
+
 async function isLocallyAvailable(helia: Helia, cid: CID): Promise<boolean> {
   try {
-    await helia.blockstore.get(cid);
+    const result = await withTimeout(
+      Promise.resolve(helia.blockstore.get(cid)),
+      3000,
+      "Timeout checking local availability"
+    );
     return true;
   } catch {
     return false;
@@ -79,8 +95,12 @@ export async function registerIpfsRoutes(
         reply.header("Cache-Control", "public, max-age=3600"); // 1 hour
       }
 
-      // Fetch the block
-      const block = await helia.blockstore.get(parsedCid);
+      // Fetch the block with timeout
+      const block = await withTimeout(
+        Promise.resolve(helia.blockstore.get(parsedCid)),
+        3000,
+        "Timeout retrieving content"
+      );
 
       // Only pin if the content was retrieved from the network
       if (!isLocal) {
