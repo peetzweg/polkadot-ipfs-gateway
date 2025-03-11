@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "metadata": {
+    "name": "Serif Account Id",
+    "type": "ProceduralAccount",
+    "mime": "text/javascript",
+    "description": "A procedural generation script for creating account-specific text designs. This JavaScript code generates unique, abstract text based on individual user accounts.",
+    "size": "Fixed",
+    "media": "bafk2bzaceafznyf2eyqs4uqjkwh6px4ngothlktm75tahj34cxddcvjnvyyei"
+  }
+}

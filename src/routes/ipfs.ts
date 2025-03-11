@@ -1,25 +1,114 @@
 import type { FastifyInstance } from "fastify";
-import { CID } from "multiformats/cid";
+import type { Helia } from "helia";
 import { unixfs } from "@helia/unixfs";
-import { heliaService } from "../services/helia.js";
-import { setContentTypeAndFormat } from "../utils/content.js";
+import type { UnixFS } from "@helia/unixfs";
+import { CID } from "multiformats/cid";
+import { PEER_CONFIG } from "../../config.js";
+import { ensureConnection } from "../utils/peer.js";
 
-export async function ipfsRoutes(fastify: FastifyInstance) {
-  // Get block by CID
+type UnixFSEntry = Awaited<ReturnType<UnixFS["ls"]>> extends AsyncIterable<
+  infer T
+>
+  ? T
+  : never;
+
+// Timeout wrapper for async operations
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorMessage: string
+): Promise<T> {
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]);
+}
+
+async function isLocallyAvailable(helia: Helia, cid: CID): Promise<boolean> {
+  try {
+    const result = await withTimeout(
+      Promise.resolve(helia.blockstore.get(cid)),
+      3000,
+      "Timeout checking local availability"
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function pinIfNew(helia: Helia, cid: CID): Promise<void> {
+  try {
+    // Check if CID is already pinned
+    let isPinned = false;
+    for await (const pinnedCid of helia.pins.ls()) {
+      if (pinnedCid.toString() === cid.toString()) {
+        isPinned = true;
+        break;
+      }
+    }
+
+    // Only pin if not already pinned
+    if (!isPinned) {
+      for await (const pinnedCid of helia.pins.add(cid)) {
+        console.log(`Pinned new CID: ${pinnedCid.toString()}`);
+      }
+    }
+  } catch (pinErr) {
+    console.warn(`Failed to pin CID ${cid.toString()}:`, pinErr);
+  }
+}
+
+export async function registerIpfsRoutes(
+  fastify: FastifyInstance,
+  helia: Helia
+) {
+  // Define route to get IPFS blocks
   fastify.get("/ipfs/:cid", async (request, reply) => {
     const { cid } = request.params as { cid: string };
 
     try {
-      await heliaService.ensureBootnodeConnection();
-
       // Parse and validate the CID
       const parsedCid = CID.parse(cid);
 
-      // Fetch the block
-      const block = await heliaService.getNode().blockstore.get(parsedCid);
+      // Check if CID is available locally first
+      const isLocal = await isLocallyAvailable(helia, parsedCid);
 
-      // Check if the codec is json (0x0200)
-      if (parsedCid.code === 0x0200) {
+      if (!isLocal) {
+        // Only connect to bootnode if content is not available locally
+        try {
+          await ensureConnection(helia, PEER_CONFIG.BOOTNODE);
+        } catch (err) {
+          reply.code(503);
+          return {
+            error: "Gateway is currently unable to connect to the network",
+          };
+        }
+      }
+
+      // Set cache headers based on content source
+      if (isLocal) {
+        // Cache locally available content longer since it's more stable
+        reply.header("Cache-Control", "public, max-age=86400"); // 24 hours
+      } else {
+        // Cache network-retrieved content for less time
+        reply.header("Cache-Control", "public, max-age=3600"); // 1 hour
+      }
+
+      // Fetch the block with timeout
+      const block = await withTimeout(
+        Promise.resolve(helia.blockstore.get(parsedCid)),
+        30000,
+        "Timeout retrieving content"
+      );
+
+      // Only pin if the content was retrieved from the network
+      if (!isLocal) {
+        await pinIfNew(helia, parsedCid);
+      }
+
+      // Check if the codec is dag-json (0x0129) or json (0x0200)
+      if (parsedCid.code === 0x0129 || parsedCid.code === 0x0200) {
         try {
           const text = new TextDecoder().decode(block);
           const json = JSON.parse(text);
@@ -48,7 +137,7 @@ export async function ipfsRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // Get file from UnixFS directory by index
+  // Define route to get a specific file from a UnixFS directory by index
   fastify.get<{
     Params: { cid: string; index: string };
   }>("/ipfs/:cid/:index", async (request, reply) => {
@@ -56,16 +145,43 @@ export async function ipfsRoutes(fastify: FastifyInstance) {
     const idx = parseInt(index, 10);
 
     try {
-      await heliaService.ensureBootnodeConnection();
-
       // Parse and validate the CID
       const parsedCid = CID.parse(cid);
 
+      // Check if directory CID is available locally first
+      const isLocal = await isLocallyAvailable(helia, parsedCid);
+
+      if (!isLocal) {
+        // Only connect to bootnode if content is not available locally
+        try {
+          await ensureConnection(helia, PEER_CONFIG.BOOTNODE);
+        } catch (err) {
+          reply.code(503);
+          return {
+            error: "Gateway is currently unable to connect to the network",
+          };
+        }
+      }
+
+      // Set cache headers based on content source
+      if (isLocal) {
+        // Cache locally available content longer since it's more stable
+        reply.header("Cache-Control", "public, max-age=86400"); // 24 hours
+      } else {
+        // Cache network-retrieved content for less time
+        reply.header("Cache-Control", "public, max-age=3600"); // 1 hour
+      }
+
       // Create UnixFS instance
-      const fs = unixfs(heliaService.getNode());
+      const fs = unixfs(helia);
+
+      // Only pin directory if it was retrieved from the network
+      if (!isLocal) {
+        await pinIfNew(helia, parsedCid);
+      }
 
       // Get directory listing
-      const entries = [];
+      const entries: UnixFSEntry[] = [];
       try {
         for await (const entry of fs.ls(parsedCid)) {
           entries.push(entry);
@@ -92,8 +208,24 @@ export async function ipfsRoutes(fastify: FastifyInstance) {
       // Get the entry at the specified index
       const targetEntry = entries[idx];
 
+      // Pin the file CID to persist it locally
+      try {
+        // Use the built-in pinning system
+        for await (const pinnedCid of helia.pins.add(targetEntry.cid)) {
+          console.log(
+            `Pinned file CID: ${pinnedCid.toString()} (${targetEntry.name})`
+          );
+        }
+      } catch (pinErr) {
+        console.warn(
+          `Failed to pin file CID ${targetEntry.cid.toString()}:`,
+          pinErr
+        );
+        // Continue even if pinning fails - we still want to return the content
+      }
+
       // Get the content of the file
-      const chunks = [];
+      const chunks: Uint8Array[] = [];
       for await (const chunk of fs.cat(targetEntry.cid)) {
         chunks.push(chunk);
       }
@@ -106,7 +238,38 @@ export async function ipfsRoutes(fastify: FastifyInstance) {
         offset += chunk.length;
       }
 
-      return setContentTypeAndFormat(targetEntry.name, content, reply);
+      // Try to determine content type
+      const fileName = targetEntry.name.toLowerCase();
+      if (fileName.endsWith(".json")) {
+        reply.header("Content-Type", "application/json");
+        try {
+          const text = new TextDecoder().decode(content);
+          return JSON.parse(text);
+        } catch {
+          // If JSON parsing fails, return as binary
+          reply.header("Content-Type", "application/octet-stream");
+          return content;
+        }
+      } else if (fileName.endsWith(".js")) {
+        reply.header("Content-Type", "text/javascript");
+        return new TextDecoder().decode(content);
+      } else if (fileName.endsWith(".png")) {
+        reply.header("Content-Type", "image/png");
+        return content;
+      } else if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) {
+        reply.header("Content-Type", "image/jpeg");
+        return content;
+      } else {
+        // Try to decode as text, fallback to binary
+        try {
+          const text = new TextDecoder().decode(content);
+          reply.header("Content-Type", "text/plain");
+          return text;
+        } catch {
+          reply.header("Content-Type", "application/octet-stream");
+          return content;
+        }
+      }
     } catch (err: any) {
       reply.code(404);
       return { error: `File not found: ${err.message}` };

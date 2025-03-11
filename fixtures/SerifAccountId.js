@@ -1,0 +1,1 @@
+function draw(t,e){const l=e.toLowerCase().toString().split(""),o=l.length,i=Math.ceil(o/8),n=1/i;t.save(),t.fillStyle="black",t.font=`bold italic ${n+.02}px serif`,t.translate(1/8,n/4);for(let e=0;e<i;e++){const o=l.splice(0,8);t.fillText(o.join(""),0,(e+1)*(n-.02),1)}t.restore()}export{draw};

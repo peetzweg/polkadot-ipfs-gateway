@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "metadata": {
+    "name": "Lemon Jelly",
+    "type": "Procedural",
+    "mime": "text/javascript",
+    "description": "A procedural generation script for creating lemon jelly-like designs. This JavaScript code produces abstract, fluid shapes reminiscent of translucent, wobbly jellies.",
+    "size": "Fixed",
+    "media": "bafk2bzacebr6swjylam3gdg2mp6dacqvwrvx33mav6py43bz3mob3z3dekin2"
+  }
+}

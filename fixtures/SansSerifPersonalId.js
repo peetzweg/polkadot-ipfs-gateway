@@ -1,0 +1,1 @@
+function draw(t,l){const e=l.toString().split("");t.save(),t.fillStyle="black";t.font=`bold ${1/3}px sans-serif`,t.translate(.2,.1),t.translate(0,.25);for(let l=0;l<4;l++){const l=e.splice(0,3);t.fillText(l.join(""),0,0,1),t.translate(0,.25)}t.restore()}export{draw};

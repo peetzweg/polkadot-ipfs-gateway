@@ -9,6 +9,9 @@ dotenv.config();
 export const SERVER_CONFIG = {
   PORT: parseInt(process.env.GATEWAY_PORT || "3000", 10),
   HOST: process.env.GATEWAY_HOST || "localhost", // Use "0.0.0.0" to expose to the web
+  ROUTE_PREFIX: process.env.ROUTE_PREFIX
+    ? `/${process.env.ROUTE_PREFIX.replace(/^\/+|\/+$/g, "")}`
+    : "", // Normalize prefix
 };
 
 // Peer configuration
@@ -16,6 +19,8 @@ export const PEER_CONFIG = {
   BOOTNODE:
     process.env.BOOTNODE_MULTIADDR ||
     "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWSYPe8ntNbUhX5BbkD1ZfFkEwoVBeUtSamJZxKiD8yxY8",
+  P2P_PORT: parseInt(process.env.P2P_PORT || "47999", 10), // Default P2P port if not specified
+  P2P_HOST: process.env.P2P_HOST || "0.0.0.0", // Default to all interfaces
 };
 
 // Parse and validate the bootnode multiaddr at startup
