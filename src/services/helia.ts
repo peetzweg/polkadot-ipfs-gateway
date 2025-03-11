@@ -32,7 +32,6 @@ export async function createNode() {
     streamMuxers: [yamux()],
     services: {
       identify: identify({
-        // protocolPrefix: "ipfs",
         maxInboundStreams: 100,
         maxOutboundStreams: 100,
       }),
