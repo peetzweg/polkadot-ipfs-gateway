@@ -2,25 +2,25 @@ import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import type { Identify as IdentifyService } from "@libp2p/identify";
 import { identify } from "@libp2p/identify";
-import { kadDHT } from "@libp2p/kad-dht";
 import { tcp } from "@libp2p/tcp";
 import { webSockets } from "@libp2p/websockets";
 import { multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
-import { DHT_PROTOCOL } from "./config.js";
 
 async function getPeerInfo(targetMultiaddr: string) {
-  // Create a libp2p node with basic capabilities
+  // Create a minimal libp2p node with just identify service
   const node = await createLibp2p({
     transports: [webSockets(), tcp()],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
     services: {
-      identify: identify(),
-      dht: kadDHT({
-        protocol: DHT_PROTOCOL,
-        clientMode: true,
+      identify: identify({
+        maxInboundStreams: 100,
+        maxOutboundStreams: 100,
       }),
+    },
+    connectionManager: {
+      maxConnections: Infinity,
     },
   });
 
