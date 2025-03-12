@@ -1,3 +1,4 @@
+import { cac } from "cac";
 import { createServer, startServer } from "./src/services/server.js";
 import { createNode, shutdownNode } from "./src/services/helia.js";
 import { loadFixtures } from "./src/services/fixtures.js";
@@ -10,13 +11,61 @@ import {
   SERVER_CONFIG,
 } from "./config.js";
 import type { FastifyInstance } from "fastify";
+import { multiaddr } from "@multiformats/multiaddr";
+
+const cli = cac("gateway");
+
+cli
+  .option("-p, --port <port>", "Port to run the gateway on")
+  .option("--prefix <prefix>", "Route prefix for all endpoints")
+  .option("--bootnode <multiaddr>", "Multiaddr of the bootnode to connect to")
+  .help();
+
+const parsed = cli.parse();
+
+// Convert port to number if provided
+const portOption = parsed.options.port
+  ? Number(parsed.options.port)
+  : undefined;
+
+// Normalize prefix if provided
+const prefixOption = parsed.options.prefix
+  ? `/${parsed.options.prefix.replace(/^\/+|\/+$/g, "")}`
+  : undefined;
+
+// Validate bootnode if provided
+const bootnodeOption = parsed.options.bootnode;
+if (bootnodeOption) {
+  try {
+    multiaddr(bootnodeOption);
+  } catch (err: any) {
+    console.error("Invalid bootnode multiaddr:", err.message);
+    process.exit(1);
+  }
+}
 
 async function main() {
   try {
+    // Override port from command line if provided
+    if (portOption) {
+      SERVER_CONFIG.PORT = portOption;
+    }
+
+    // Override route prefix from command line if provided
+    if (prefixOption) {
+      SERVER_CONFIG.ROUTE_PREFIX = prefixOption;
+    }
+
+    // Override bootnode from command line if provided
+    if (bootnodeOption) {
+      PEER_CONFIG.BOOTNODE = bootnodeOption;
+    }
+
     // Print configuration summary
     console.log("\nStarting gateway with configuration:");
     console.log("==================================");
     console.log("Server Configuration:");
+    console.log(`  Port: ${SERVER_CONFIG.PORT}`);
     if (SERVER_CONFIG.ROUTE_PREFIX) {
       console.log(`  Route Prefix: ${SERVER_CONFIG.ROUTE_PREFIX}`);
     }

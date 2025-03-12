@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "tsc && node dist/gateway.js",
-    "identity": "tsc && node dist/identity.js"
+    "identity": "tsc && node dist/identity.js",
+    "build": "tsc"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
@@ -32,6 +33,7 @@
     "@multiformats/multiaddr": "^12.3.4",
     "blockstore-core": "^5.0.2",
     "blockstore-fs": "^2.0.2",
+    "cac": "^6.7.14",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
     "helia": "^5.2.0",
