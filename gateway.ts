@@ -30,7 +30,7 @@ const portOption = parsed.options.port
 
 // Normalize prefix if provided
 const prefixOption = parsed.options.prefix
-  ? `/${parsed.options.prefix.replace(/^\/+|\/+$/g, "")}`
+  ? `/${String(parsed.options.prefix).replace(/^\/+|\/+$/g, "")}`
   : undefined;
 
 // Validate bootnode if provided
