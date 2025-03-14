@@ -131,39 +131,9 @@ export async function registerIpfsRoutes(
         await pinIfNew(helia, parsedCid);
       }
 
-      // Check if the codec is dag-json (0x0129) or json (0x0200)
-      if (parsedCid.code === 0x0129 || parsedCid.code === 0x0200) {
-        console.log("[DEBUG] Detected JSON codec, attempting to parse as JSON");
-        try {
-          const text = new TextDecoder().decode(block);
-          const json = JSON.parse(text);
-          console.log("[DEBUG] Successfully parsed as JSON");
-          reply.header("Content-Type", "application/json");
-          return json;
-        } catch (parseErr) {
-          console.log(
-            "[DEBUG] JSON parsing failed, falling back to binary",
-            parseErr
-          );
-          // If JSON parsing fails, fall back to binary
-          reply.header("Content-Type", "application/octet-stream");
-          return block;
-        }
-      }
-
-      // For non-json content, try to decode as UTF-8 text first
-      console.log("[DEBUG] Attempting to decode as UTF-8 text");
-      try {
-        const text = new TextDecoder().decode(block);
-        console.log("[DEBUG] Successfully decoded as UTF-8 text");
-        reply.header("Content-Type", "text/plain");
-        return text;
-      } catch {
-        console.log("[DEBUG] UTF-8 decoding failed, sending as binary");
-        // If not valid UTF-8, send as binary
-        reply.header("Content-Type", "application/octet-stream");
-        return block;
-      }
+      // Always return as binary data
+      reply.header("Content-Type", "application/octet-stream");
+      return block;
     } catch (err: any) {
       console.error("[DEBUG] Error processing request:", err);
       reply.code(404);
@@ -272,38 +242,9 @@ export async function registerIpfsRoutes(
         offset += chunk.length;
       }
 
-      // Try to determine content type
-      const fileName = targetEntry.name.toLowerCase();
-      if (fileName.endsWith(".json")) {
-        reply.header("Content-Type", "application/json");
-        try {
-          const text = new TextDecoder().decode(content);
-          return JSON.parse(text);
-        } catch {
-          // If JSON parsing fails, return as binary
-          reply.header("Content-Type", "application/octet-stream");
-          return content;
-        }
-      } else if (fileName.endsWith(".js")) {
-        reply.header("Content-Type", "text/javascript");
-        return new TextDecoder().decode(content);
-      } else if (fileName.endsWith(".png")) {
-        reply.header("Content-Type", "image/png");
-        return content;
-      } else if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) {
-        reply.header("Content-Type", "image/jpeg");
-        return content;
-      } else {
-        // Try to decode as text, fallback to binary
-        try {
-          const text = new TextDecoder().decode(content);
-          reply.header("Content-Type", "text/plain");
-          return text;
-        } catch {
-          reply.header("Content-Type", "application/octet-stream");
-          return content;
-        }
-      }
+      // Always return as binary data
+      reply.header("Content-Type", "application/octet-stream");
+      return content;
     } catch (err: any) {
       reply.code(404);
       return { error: `File not found: ${err.message}` };
