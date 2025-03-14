@@ -7,6 +7,7 @@ import { webSockets } from "@libp2p/websockets";
 import { multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
 import { DHT_PROTOCOL } from "../../config.js";
+import { getOrCreatePrivateKey } from "./keyUtils.js";
 
 /**
  * Detects Kademlia DHT protocols supported by the specified peer(s)
@@ -21,7 +22,9 @@ export async function detectKadProtocols(targetMultiaddrs: string | string[]) {
     : [targetMultiaddrs];
 
   // Create a libp2p node with basic capabilities
+  const privateKey = await getOrCreatePrivateKey();
   const node = await createLibp2p({
+    privateKey,
     transports: [webSockets(), tcp()],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
@@ -86,6 +89,7 @@ export async function detectKadProtocols(targetMultiaddrs: string | string[]) {
   } finally {
     // Clean up
     await node.stop();
+    console.log("Node stopped for identity check");
   }
 
   return {
