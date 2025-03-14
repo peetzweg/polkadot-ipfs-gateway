@@ -24,16 +24,19 @@ async function withTimeout<T>(
   return Promise.race([promise, timeout]);
 }
 
-async function isLocallyAvailable(helia: Helia, cid: CID): Promise<boolean> {
+async function isLocallyAvailable(
+  helia: Helia,
+  cid: CID
+): Promise<{ available: boolean; block?: Uint8Array }> {
   try {
-    const result = await withTimeout(
+    const block = await withTimeout(
       Promise.resolve(helia.blockstore.get(cid)),
       3000,
       "Timeout checking local availability"
     );
-    return true;
+    return { available: true, block };
   } catch {
-    return false;
+    return { available: false };
   }
 }
 
@@ -70,15 +73,30 @@ export async function registerIpfsRoutes(
     try {
       // Parse and validate the CID
       const parsedCid = CID.parse(cid);
+      console.log(
+        `[DEBUG] Processing request for CID: ${parsedCid.toString()}, codec: 0x${parsedCid.code.toString(
+          16
+        )}`
+      );
 
-      // Check if CID is available locally first
-      const isLocal = await isLocallyAvailable(helia, parsedCid);
+      // Check if CID is available locally first and get the block data if it is
+      const localCheck = await isLocallyAvailable(helia, parsedCid);
+      console.log(
+        `[DEBUG] Local availability check: ${
+          localCheck.available ? "available locally" : "not available locally"
+        }`
+      );
 
-      if (!isLocal) {
+      if (!localCheck.available) {
+        console.log(
+          "[DEBUG] Attempting to connect to bootnode for content retrieval"
+        );
         // Only connect to bootnode if content is not available locally
         try {
           await ensureConnection(helia, PEER_CONFIG.BOOTNODE);
+          console.log("[DEBUG] Successfully connected to bootnode");
         } catch (err) {
+          console.error("[DEBUG] Failed to connect to bootnode:", err);
           reply.code(503);
           return {
             error: "Gateway is currently unable to connect to the network",
@@ -87,7 +105,7 @@ export async function registerIpfsRoutes(
       }
 
       // Set cache headers based on content source
-      if (isLocal) {
+      if (localCheck.available) {
         // Cache locally available content longer since it's more stable
         reply.header("Cache-Control", "public, max-age=86400"); // 24 hours
       } else {
@@ -95,26 +113,38 @@ export async function registerIpfsRoutes(
         reply.header("Cache-Control", "public, max-age=3600"); // 1 hour
       }
 
-      // Fetch the block with timeout
-      const block = await withTimeout(
-        Promise.resolve(helia.blockstore.get(parsedCid)),
-        30000,
-        "Timeout retrieving content"
+      // Use the block from local check if available, otherwise fetch it
+      console.log("[DEBUG] Attempting to get block data");
+      const block =
+        localCheck.block ??
+        (await withTimeout(
+          Promise.resolve(helia.blockstore.get(parsedCid)),
+          30000,
+          "Timeout retrieving content"
+        ));
+      console.log(
+        `[DEBUG] Successfully retrieved block, size: ${block.length} bytes`
       );
 
       // Only pin if the content was retrieved from the network
-      if (!isLocal) {
+      if (!localCheck.available) {
         await pinIfNew(helia, parsedCid);
       }
 
       // Check if the codec is dag-json (0x0129) or json (0x0200)
       if (parsedCid.code === 0x0129 || parsedCid.code === 0x0200) {
+        console.log("[DEBUG] Detected JSON codec, attempting to parse as JSON");
         try {
           const text = new TextDecoder().decode(block);
           const json = JSON.parse(text);
+          console.log("[DEBUG] Successfully parsed as JSON");
           reply.header("Content-Type", "application/json");
           return json;
         } catch (parseErr) {
+          console.log(
+            "[DEBUG] JSON parsing failed, falling back to binary",
+            parseErr
+          );
           // If JSON parsing fails, fall back to binary
           reply.header("Content-Type", "application/octet-stream");
           return block;
@@ -122,16 +152,20 @@ export async function registerIpfsRoutes(
       }
 
       // For non-json content, try to decode as UTF-8 text first
+      console.log("[DEBUG] Attempting to decode as UTF-8 text");
       try {
         const text = new TextDecoder().decode(block);
+        console.log("[DEBUG] Successfully decoded as UTF-8 text");
         reply.header("Content-Type", "text/plain");
         return text;
       } catch {
+        console.log("[DEBUG] UTF-8 decoding failed, sending as binary");
         // If not valid UTF-8, send as binary
         reply.header("Content-Type", "application/octet-stream");
         return block;
       }
     } catch (err: any) {
+      console.error("[DEBUG] Error processing request:", err);
       reply.code(404);
       return { error: `Block not found: ${err.message}` };
     }
@@ -149,9 +183,9 @@ export async function registerIpfsRoutes(
       const parsedCid = CID.parse(cid);
 
       // Check if directory CID is available locally first
-      const isLocal = await isLocallyAvailable(helia, parsedCid);
+      const localCheck = await isLocallyAvailable(helia, parsedCid);
 
-      if (!isLocal) {
+      if (!localCheck.available) {
         // Only connect to bootnode if content is not available locally
         try {
           await ensureConnection(helia, PEER_CONFIG.BOOTNODE);
@@ -164,7 +198,7 @@ export async function registerIpfsRoutes(
       }
 
       // Set cache headers based on content source
-      if (isLocal) {
+      if (localCheck.available) {
         // Cache locally available content longer since it's more stable
         reply.header("Cache-Control", "public, max-age=86400"); // 24 hours
       } else {
@@ -176,7 +210,7 @@ export async function registerIpfsRoutes(
       const fs = unixfs(helia);
 
       // Only pin directory if it was retrieved from the network
-      if (!isLocal) {
+      if (!localCheck.available) {
         await pinIfNew(helia, parsedCid);
       }
 
