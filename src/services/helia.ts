@@ -1,5 +1,13 @@
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
+import {
+  Ed25519PrivateKey,
+  generateKeyPair,
+  generateKeyPairFromSeed,
+  marshalPrivateKey,
+  unmarshalPrivateKey,
+} from "@libp2p/crypto/keys";
+import { peerIdFromPrivateKey } from "@libp2p/peer-id";
 import { identify } from "@libp2p/identify";
 import { kadDHT } from "@libp2p/kad-dht";
 import { tcp } from "@libp2p/tcp";
@@ -11,6 +19,8 @@ import { createHelia } from "helia";
 import { createLibp2p } from "libp2p";
 import { BLOCKSTORE_CONFIG, DHT_PROTOCOL, PEER_CONFIG } from "../../config.js";
 import { determineBestKadProtocol } from "../utils/kadUtils.js";
+import { existsSync, readFileSync, writeFileSync } from "fs";
+import type { PrivateKey } from "@libp2p/interface";
 
 // Create a Helia node and ensure connection to bootnode
 export async function createNode() {
@@ -26,7 +36,32 @@ export async function createNode() {
     console.log(`Falling back to configured protocol: ${DHT_PROTOCOL}`);
   }
 
+  let privateKey: Ed25519PrivateKey;
+
+  if (existsSync("./pk.txt")) {
+    try {
+      const pkHexString = readFileSync("./pk.txt", "utf-8");
+      const pkBytes = new Uint8Array(Buffer.from(pkHexString, "hex"));
+      privateKey = (await unmarshalPrivateKey(pkBytes)) as Ed25519PrivateKey;
+      console.log("Successfully restored private key from pk.txt");
+    } catch (err) {
+      console.error("Failed to restore private key:", err);
+      throw err;
+    }
+  } else {
+    console.log("Generating new Ed25519 private key...");
+    privateKey = (await generateKeyPair("Ed25519")) as Ed25519PrivateKey;
+    const marshaledKey = await marshalPrivateKey(privateKey);
+    const pkHexString = Buffer.from(marshaledKey).toString("hex");
+    writeFileSync("pk.txt", pkHexString);
+    console.log("New private key generated and saved to pk.txt");
+  }
+  console.log("privateKey", privateKey);
+  // const peerId = peerIdFromPrivateKey(privateKey as any);
+  // console.log("POLO peerId", peerId);
+
   const libp2p = await createLibp2p({
+    privateKey: privateKey,
     transports: [webSockets(), tcp()],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
