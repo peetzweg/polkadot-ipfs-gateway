@@ -13,6 +13,11 @@ import {
 import type { FastifyInstance } from "fastify";
 import { multiaddr } from "@multiformats/multiaddr";
 
+// Health check configuration
+const HEALTH_CHECK_INTERVAL = 30000; // Check every 30 seconds
+const HEALTH_CHECK_TIMEOUT = 5000; // 5 second timeout for health checks
+const MAX_CONSECUTIVE_FAILURES = 3; // Number of failures before restart
+
 const cli = cac("gateway");
 
 cli
@@ -42,6 +47,118 @@ if (bootnodeOption) {
     console.error("Invalid bootnode multiaddr:", err.message);
     process.exit(1);
   }
+}
+
+async function checkHealth(server: FastifyInstance): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      HEALTH_CHECK_TIMEOUT
+    );
+
+    try {
+      const response = await fetch(
+        `http://${SERVER_CONFIG.HOST}:${SERVER_CONFIG.PORT}${SERVER_CONFIG.ROUTE_PREFIX}/health`,
+        { signal: controller.signal }
+      );
+
+      if (!response.ok) {
+        console.error(`Health check failed with status: ${response.status}`);
+        return false;
+      }
+
+      const health = await response.json();
+      if (health.status !== "healthy") {
+        console.error(`Unhealthy status: ${JSON.stringify(health)}`);
+        return false;
+      }
+
+      return true;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      console.error("Health check timed out");
+    } else {
+      console.error("Health check failed:", err);
+    }
+    return false;
+  }
+}
+
+async function startHealthMonitoring(server: FastifyInstance, heliaNode: any) {
+  let consecutiveFailures = 0;
+  let isRestarting = false;
+
+  const healthCheck = async () => {
+    if (isRestarting) return;
+
+    const isHealthy = await checkHealth(server);
+
+    if (!isHealthy) {
+      consecutiveFailures++;
+      console.warn(
+        `Health check failed. Consecutive failures: ${consecutiveFailures}`
+      );
+
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        isRestarting = true;
+        console.error("Gateway is unhealthy. Initiating restart...");
+
+        try {
+          // Shutdown existing services
+          await shutdownNode(heliaNode);
+          await server.close();
+
+          console.log("Services shut down. Restarting...");
+
+          // Restart services
+          const newHeliaNode = await createNode();
+          await loadFixtures(newHeliaNode);
+
+          const newServer = await createServer();
+
+          // Re-register routes
+          if (SERVER_CONFIG.ROUTE_PREFIX) {
+            await newServer.register(
+              async (instance: FastifyInstance) => {
+                await registerHealthRoute(instance, newHeliaNode);
+                await registerIpfsRoutes(instance, newHeliaNode);
+              },
+              { prefix: SERVER_CONFIG.ROUTE_PREFIX }
+            );
+          } else {
+            await registerHealthRoute(newServer, newHeliaNode);
+            await registerIpfsRoutes(newServer, newHeliaNode);
+          }
+
+          await startServer(newServer);
+
+          console.log("Gateway successfully restarted!");
+          consecutiveFailures = 0;
+        } catch (err) {
+          console.error("Failed to restart gateway:", err);
+          process.exit(1);
+        } finally {
+          isRestarting = false;
+        }
+      }
+    } else {
+      if (consecutiveFailures > 0) {
+        console.log("Health check recovered. Resetting failure counter.");
+        consecutiveFailures = 0;
+      }
+    }
+  };
+
+  // Start periodic health checks
+  const interval = setInterval(healthCheck, HEALTH_CHECK_INTERVAL);
+
+  // Clean up interval on process exit
+  process.on("SIGTERM", () => clearInterval(interval));
+  process.on("SIGINT", () => clearInterval(interval));
 }
 
 async function main() {
@@ -104,6 +221,9 @@ async function main() {
 
     // Start server
     await startServer(server);
+
+    // Start health monitoring
+    await startHealthMonitoring(server, heliaNode);
 
     // Graceful shutdown handler
     async function shutdown() {
