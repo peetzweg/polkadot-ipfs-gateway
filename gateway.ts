@@ -24,6 +24,7 @@ cli
   .option("-p, --port <port>", "Port to run the gateway on")
   .option("--prefix <prefix>", "Route prefix for all endpoints")
   .option("--bootnode <multiaddr>", "Multiaddr of the bootnode to connect to")
+  .option("--p2p-port <p2p_port>", "Port for P2P communication")
   .help();
 
 const parsed = cli.parse();
@@ -31,6 +32,11 @@ const parsed = cli.parse();
 // Convert port to number if provided
 const portOption = parsed.options.port
   ? Number(parsed.options.port)
+  : undefined;
+
+// Convert P2P port to number if provided
+const p2pPortOption = parsed.options.p2p_port
+  ? Number(parsed.options.p2p_port)
   : undefined;
 
 // Normalize prefix if provided
@@ -178,6 +184,11 @@ async function main() {
       PEER_CONFIG.BOOTNODE = bootnodeOption;
     }
 
+    // Override P2P port from command line if provided
+    if (p2pPortOption) {
+      PEER_CONFIG.P2P_PORT = p2pPortOption;
+    }
+
     // Print configuration summary
     console.log("\nStarting gateway with configuration:");
     console.log("==================================");
@@ -188,6 +199,7 @@ async function main() {
     }
     console.log("Peer Configuration:");
     console.log(`  Bootnode: ${PEER_CONFIG.BOOTNODE}`);
+    console.log(`  P2P Port: ${PEER_CONFIG.P2P_PORT}`);
     console.log("\nDHT Configuration:");
     console.log(`  Protocol: ${DHT_PROTOCOL || "default"}`);
     console.log("\nBlockstore Configuration:");
