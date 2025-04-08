@@ -24,7 +24,7 @@ cli
   .option("-p, --port <port>", "Port to run the gateway on")
   .option("--prefix <prefix>", "Route prefix for all endpoints")
   .option("--bootnode <multiaddr>", "Multiaddr of the bootnode to connect to")
-  .option("--p2p-port <p2p_port>", "Port for P2P communication")
+  .option("--p2p-port <port>", "Port for P2P communication")
   .help();
 
 const parsed = cli.parse();
@@ -35,8 +35,8 @@ const portOption = parsed.options.port
   : undefined;
 
 // Convert P2P port to number if provided
-const p2pPortOption = parsed.options.p2p_port
-  ? Number(parsed.options.p2p_port)
+const p2pPortOption = parsed.options.p2pPort
+  ? Number(parsed.options.p2pPort)
   : undefined;
 
 // Normalize prefix if provided
