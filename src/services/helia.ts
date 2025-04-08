@@ -1,6 +1,5 @@
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
-import { peerIdFromPrivateKey } from "@libp2p/peer-id";
 import { identify } from "@libp2p/identify";
 import { kadDHT } from "@libp2p/kad-dht";
 import { tcp } from "@libp2p/tcp";
@@ -13,8 +12,6 @@ import { createLibp2p } from "libp2p";
 import { BLOCKSTORE_CONFIG, DHT_PROTOCOL, PEER_CONFIG } from "../../config.js";
 import { determineBestKadProtocol } from "../utils/kadUtils.js";
 import { getOrCreatePrivateKey } from "../utils/keyUtils.js";
-import { existsSync, readFileSync, writeFileSync } from "fs";
-import type { PrivateKey } from "@libp2p/interface";
 
 // Create a Helia node and ensure connection to bootnode
 export async function createNode() {
