@@ -94,79 +94,6 @@ async function checkHealth(server: FastifyInstance): Promise<boolean> {
   }
 }
 
-async function startHealthMonitoring(server: FastifyInstance, heliaNode: any) {
-  let consecutiveFailures = 0;
-  let isRestarting = false;
-
-  const healthCheck = async () => {
-    if (isRestarting) return;
-
-    const isHealthy = await checkHealth(server);
-
-    if (!isHealthy) {
-      consecutiveFailures++;
-      console.warn(
-        `Health check failed. Consecutive failures: ${consecutiveFailures}`
-      );
-
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        isRestarting = true;
-        console.error("Gateway is unhealthy. Initiating restart...");
-
-        try {
-          // Shutdown existing services
-          await shutdownNode(heliaNode);
-          await server.close();
-
-          console.log("Services shut down. Restarting...");
-
-          // Restart services
-          const newHeliaNode = await createNode();
-          await loadFixtures(newHeliaNode);
-
-          const newServer = await createServer();
-
-          // Re-register routes
-          if (SERVER_CONFIG.ROUTE_PREFIX) {
-            await newServer.register(
-              async (instance: FastifyInstance) => {
-                await registerHealthRoute(instance, newHeliaNode);
-                await registerIpfsRoutes(instance, newHeliaNode);
-              },
-              { prefix: SERVER_CONFIG.ROUTE_PREFIX }
-            );
-          } else {
-            await registerHealthRoute(newServer, newHeliaNode);
-            await registerIpfsRoutes(newServer, newHeliaNode);
-          }
-
-          await startServer(newServer);
-
-          console.log("Gateway successfully restarted!");
-          consecutiveFailures = 0;
-        } catch (err) {
-          console.error("Failed to restart gateway:", err);
-          process.exit(1);
-        } finally {
-          isRestarting = false;
-        }
-      }
-    } else {
-      if (consecutiveFailures > 0) {
-        console.log("Health check recovered. Resetting failure counter.");
-        consecutiveFailures = 0;
-      }
-    }
-  };
-
-  // Start periodic health checks
-  const interval = setInterval(healthCheck, HEALTH_CHECK_INTERVAL);
-
-  // Clean up interval on process exit
-  process.on("SIGTERM", () => clearInterval(interval));
-  process.on("SIGINT", () => clearInterval(interval));
-}
-
 async function main() {
   try {
     // Override port from command line if provided
@@ -233,9 +160,6 @@ async function main() {
 
     // Start server
     await startServer(server);
-
-    // Start health monitoring
-    await startHealthMonitoring(server, heliaNode);
 
     // Graceful shutdown handler
     async function shutdown() {
