@@ -48,7 +48,8 @@ export async function loadFixtures(helia: Helia) {
 
         // Pin the CID to ensure it's always available
         try {
-          await helia.pins.add(cid);
+          for await (const _ of helia.pins.add(cid)) {
+          }
         } catch (pinErr) {
           console.warn(`Failed to pin CID ${cid.toString()}:`, pinErr);
         }
@@ -87,7 +88,9 @@ export async function loadFixtures(helia: Helia) {
         if (lastCID) {
           // Pin the directory CID to ensure it's always available
           try {
-            await helia.pins.add(lastCID);
+            for await (const _ of helia.pins.add(lastCID)) {
+              // console.log(`Pinned directory CID: ${pinnedCid.toString()}`);
+            }
           } catch (pinErr) {
             console.warn(
               `Failed to pin directory CID ${lastCID.toString()}:`,

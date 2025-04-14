@@ -41,23 +41,13 @@ async function isLocallyAvailable(
 }
 
 async function pinIfNew(helia: Helia, cid: CID): Promise<void> {
-  try {
-    // Check if CID is already pinned
-    let isPinned = false;
-    try {
-      const details = await helia.pins.get(cid);
-      if (details) {
-        isPinned = true;
-      }
-    } catch (err) {
-      console.warn(`CID '${cid.toString()}' not pinned yet.`);
-    }
+  // Check if CID is already pinned
+  let isPinned = await helia.pins.isPinned(cid);
+  if (isPinned) return;
 
-    // Only pin if not already pinned
-    if (!isPinned) {
-      for await (const pinnedCid of helia.pins.add(cid)) {
-        console.log(`Pinned new CID: ${pinnedCid.toString()}`);
-      }
+  try {
+    for await (const pinnedCid of helia.pins.add(cid)) {
+      console.log(`Pinned new CID: ${pinnedCid.toString()}`);
     }
   } catch (pinErr) {
     console.warn(`Failed to pin CID ${cid.toString()}:`, pinErr);
@@ -106,15 +96,6 @@ export async function registerIpfsRoutes(
         }
       }
 
-      // Set cache headers based on content source
-      if (localCheck.available) {
-        // Cache locally available content longer since it's more stable
-        reply.header("Cache-Control", "public, max-age=86400"); // 24 hours
-      } else {
-        // Cache network-retrieved content for less time
-        reply.header("Cache-Control", "public, max-age=3600"); // 1 hour
-      }
-
       // Use the block from local check if available, otherwise fetch it
       console.log("[DEBUG] Attempting to get block data");
       const block =
@@ -128,12 +109,10 @@ export async function registerIpfsRoutes(
         `[DEBUG] Successfully retrieved block, size: ${block.length} bytes`
       );
 
-      // Only pin if the content was retrieved from the network
-      if (!localCheck.available) {
-        await pinIfNew(helia, parsedCid);
-      }
+      await pinIfNew(helia, parsedCid);
 
       // Always return as binary data
+      reply.header("Cache-Control", "public, max-age=86400"); // 24 hours
       reply.header("Content-Type", "application/octet-stream");
       return block;
     } catch (err: any) {
@@ -260,7 +239,8 @@ export async function registerIpfsRoutes(
 
       // Iterate through all pinned CIDs
       for await (const pinnedCid of helia.pins.ls()) {
-        pinnedCids.push(pinnedCid.toString());
+        console.log(`Pinned CID: ${pinnedCid.cid.toString()}`);
+        pinnedCids.push(pinnedCid.cid.toString());
       }
 
       // Return the list of pinned CIDs

@@ -135,6 +135,7 @@ async function main() {
 
     // Initialize Helia node
     const heliaNode = await createNode();
+    await heliaNode.start();
 
     // Load fixtures
     await loadFixtures(heliaNode);
