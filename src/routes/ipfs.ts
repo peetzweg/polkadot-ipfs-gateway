@@ -245,8 +245,8 @@ export async function registerIpfsRoutes(
 
       // Return the list of pinned CIDs
       return {
-        pinned_cids: pinnedCids,
         count: pinnedCids.length,
+        pinned_cids: pinnedCids,
       };
     } catch (err: any) {
       console.error("[DEBUG] Error listing pinned CIDs:", err);
