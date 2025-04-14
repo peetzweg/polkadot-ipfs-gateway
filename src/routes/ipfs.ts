@@ -44,11 +44,13 @@ async function pinIfNew(helia: Helia, cid: CID): Promise<void> {
   try {
     // Check if CID is already pinned
     let isPinned = false;
-    for await (const pinnedCid of helia.pins.ls()) {
-      if (pinnedCid.toString() === cid.toString()) {
+    try {
+      const details = await helia.pins.get(cid);
+      if (details) {
         isPinned = true;
-        break;
       }
+    } catch (err) {
+      console.warn(`CID '${cid.toString()}' not pinned yet.`);
     }
 
     // Only pin if not already pinned
@@ -248,6 +250,28 @@ export async function registerIpfsRoutes(
     } catch (err: any) {
       reply.code(404);
       return { error: `File not found: ${err.message}` };
+    }
+  });
+
+  // Define route to list all pinned CIDs
+  fastify.get("/list", async (request, reply) => {
+    try {
+      const pinnedCids: string[] = [];
+
+      // Iterate through all pinned CIDs
+      for await (const pinnedCid of helia.pins.ls()) {
+        pinnedCids.push(pinnedCid.toString());
+      }
+
+      // Return the list of pinned CIDs
+      return {
+        pinned_cids: pinnedCids,
+        count: pinnedCids.length,
+      };
+    } catch (err: any) {
+      console.error("[DEBUG] Error listing pinned CIDs:", err);
+      reply.code(500);
+      return { error: `Failed to list pinned CIDs: ${err.message}` };
     }
   });
 }
