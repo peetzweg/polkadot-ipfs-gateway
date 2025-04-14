@@ -46,6 +46,13 @@ export async function loadFixtures(helia: Helia) {
         // Add the content to blockstore
         await helia.blockstore.put(cid, contentBuffer);
 
+        // Pin the CID to ensure it's always available
+        try {
+          await helia.pins.add(cid);
+        } catch (pinErr) {
+          console.warn(`Failed to pin CID ${cid.toString()}:`, pinErr);
+        }
+
         console.log(`  ✓ Added file ${file.name} with CID: ${cid.toString()}`);
       } catch (err: any) {
         console.error(`  ✗ Failed to add file ${file.name}:`, err.message);
@@ -78,6 +85,16 @@ export async function loadFixtures(helia: Helia) {
         }
 
         if (lastCID) {
+          // Pin the directory CID to ensure it's always available
+          try {
+            await helia.pins.add(lastCID);
+          } catch (pinErr) {
+            console.warn(
+              `Failed to pin directory CID ${lastCID.toString()}:`,
+              pinErr
+            );
+          }
+
           // List all files in the directory
           // for await (const file of unixFS.ls(lastCID)) {
           //   console.log(`    - ${file.name} (${file.cid.toString()})`);
