@@ -12,6 +12,7 @@ import { createLibp2p } from "libp2p";
 import { BLOCKSTORE_CONFIG, DHT_PROTOCOL, PEER_CONFIG } from "../../config.js";
 import { determineBestKadProtocol } from "../utils/kadUtils.js";
 import { getOrCreatePrivateKey } from "../utils/keyUtils.js";
+import { mkdir } from "fs/promises";
 
 // Create a Helia node and ensure connection to bootnode
 export async function createNode() {
@@ -57,6 +58,17 @@ export async function createNode() {
       maxConnections: Infinity,
     },
   });
+
+  // Ensure blockstore directory exists
+  try {
+    await mkdir(BLOCKSTORE_CONFIG.PATH, { recursive: true });
+    console.log(
+      `Blockstore directory created/verified: ${BLOCKSTORE_CONFIG.PATH}`
+    );
+  } catch (err: any) {
+    console.error(`Failed to create blockstore directory: ${err.message}`);
+    throw err;
+  }
 
   // Initialize the filesystem blockstore
   const blockstore = new FsBlockstore(BLOCKSTORE_CONFIG.PATH);

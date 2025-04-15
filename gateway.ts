@@ -12,6 +12,7 @@ import {
 } from "./config.js";
 import type { FastifyInstance } from "fastify";
 import { multiaddr } from "@multiformats/multiaddr";
+import path from "path";
 
 // Health check configuration
 const HEALTH_CHECK_INTERVAL = 30000; // Check every 30 seconds
@@ -25,6 +26,10 @@ cli
   .option("--prefix <prefix>", "Route prefix for all endpoints")
   .option("--bootnode <multiaddr>", "Multiaddr of the bootnode to connect to")
   .option("--p2p-port <port>", "Port for P2P communication")
+  .option(
+    "--blockstore-folder <folder>",
+    "Folder name for the blockstore (default: blocks)"
+  )
   .help();
 
 const parsed = cli.parse();
@@ -116,6 +121,17 @@ async function main() {
       PEER_CONFIG.P2P_PORT = p2pPortOption;
     }
 
+    // Override blockstore folder from command line if provided
+    if (parsed.options.blockstoreFolder) {
+      process.env.BLOCKSTORE_FOLDER = parsed.options.blockstoreFolder;
+      // Update the PATH to use the new folder name
+      BLOCKSTORE_CONFIG.PATH = path.join(
+        process.cwd(),
+        parsed.options.blockstoreFolder
+      );
+      BLOCKSTORE_CONFIG.FOLDER = parsed.options.blockstoreFolder;
+    }
+
     // Print configuration summary
     console.log("\nStarting gateway with configuration:");
     console.log("==================================");
@@ -131,6 +147,7 @@ async function main() {
     console.log(`  Protocol: ${DHT_PROTOCOL || "default"}`);
     console.log("\nBlockstore Configuration:");
     console.log(`  Path: ${BLOCKSTORE_CONFIG.PATH}`);
+    console.log(`  Folder: ${BLOCKSTORE_CONFIG.FOLDER}`);
     console.log("==================================\n");
 
     // Initialize Helia node

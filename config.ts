@@ -38,5 +38,8 @@ export const DHT_PROTOCOL =
 
 // Blockstore configuration
 export const BLOCKSTORE_CONFIG = {
-  PATH: process.env.BLOCKSTORE_PATH || path.join(process.cwd(), "blocks"),
+  PATH:
+    process.env.BLOCKSTORE_PATH ||
+    path.join(process.cwd(), process.env.BLOCKSTORE_FOLDER || "blocks"),
+  FOLDER: process.env.BLOCKSTORE_FOLDER || "blocks",
 };
