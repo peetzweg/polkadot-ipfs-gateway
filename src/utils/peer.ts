@@ -1,24 +1,13 @@
 import { multiaddr } from "@multiformats/multiaddr";
 import type { Helia } from "helia";
-import type { PeerId } from "@libp2p/interface";
+import type { Libp2p, PeerId, ServiceMap } from "@libp2p/interface";
 import { fromString as uint8ArrayFromString } from "uint8arrays/from-string";
 
 let reconnectionPromise: Promise<void> | null = null;
 let lastReconnectionAttempt = 0;
 const RECONNECTION_COOLDOWN = 5000; // 5 seconds cooldown between reconnection attempts
 
-interface Libp2p {
-  peerId: PeerId;
-  getPeers(): PeerId[];
-  dial(peer: any): Promise<any>;
-  services: {
-    dht: {
-      getClosestPeers(key: Uint8Array): Promise<PeerId[]>;
-    };
-  };
-}
-
-interface HeliaWithLibp2p extends Helia {
+interface HeliaWithLibp2p extends Helia<Libp2p<ServiceMap>> {
   libp2p: Libp2p;
 }
 
