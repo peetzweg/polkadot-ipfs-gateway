@@ -12,7 +12,7 @@
 #   - Local Kubo node running (ipfs daemon)
 #   - ipfs CLI available in PATH
 
-set -e
+# Don't use set -e as we handle errors manually
 
 # Default fixtures directory (relative to script location)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -90,13 +90,26 @@ echo ""
 echo "Uploading and pinning fixtures..."
 echo "=========================================="
 
-# Helper function to format file size
+# Helper function to get file size (cross-platform)
+get_file_size() {
+    local file="$1"
+    # Try Linux stat first, then macOS stat
+    if stat --version &>/dev/null 2>&1; then
+        # GNU stat (Linux)
+        stat -c%s "$file" 2>/dev/null
+    else
+        # BSD stat (macOS)
+        stat -f%z "$file" 2>/dev/null
+    fi
+}
+
+# Helper function to format file size (no bc dependency)
 format_size() {
     local size=$1
-    if [ $size -ge 1048576 ]; then
-        echo "$(echo "scale=2; $size / 1048576" | bc)MB"
-    elif [ $size -ge 1024 ]; then
-        echo "$(echo "scale=1; $size / 1024" | bc)KB"
+    if [ "$size" -ge 1048576 ]; then
+        echo "$((size / 1048576))MB"
+    elif [ "$size" -ge 1024 ]; then
+        echo "$((size / 1024))KB"
     else
         echo "${size}B"
     fi
@@ -110,30 +123,39 @@ echo "-------------------------------------------"
 for file in "$FIXTURES_DIR"/*; do
     if [ -f "$file" ]; then
         filename=$(basename "$file")
-        filesize=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
+        filesize=$(get_file_size "$file")
+
+        # Skip if we couldn't get file size
+        if [ -z "$filesize" ]; then
+            echo -e "  ${RED}✗${NC} $filename - FAILED (couldn't determine file size)"
+            FILES_FAILED=$((FILES_FAILED + 1))
+            FAILED_ITEMS+=("$filename: couldn't determine file size")
+            continue
+        fi
 
         if [[ "$filename" == *.json ]]; then
             # Check file size
             if [ "$filesize" -gt "$MAX_BLOCK_SIZE" ]; then
                 echo -e "  ${YELLOW}⊘${NC} $filename - SKIPPED ($(format_size $filesize) > 1MB limit)"
                 echo "    File too large for single block transfer via bitswap"
-                ((FILES_SKIPPED_SIZE++))
+                FILES_SKIPPED_SIZE=$((FILES_SKIPPED_SIZE + 1))
                 SKIPPED_SIZE_ITEMS+=("$filename ($(format_size $filesize))")
                 continue
             fi
 
             # JSON files: blake2b-256 hash + json codec (0x0200)
             cid=$(ipfs block put --pin --mhtype=blake2b-256 --cid-codec=json "$file" 2>&1)
+            exit_code=$?
 
-            if [ $? -eq 0 ]; then
+            if [ $exit_code -eq 0 ]; then
                 echo -e "  ${GREEN}✓${NC} $filename (json + blake2b-256, $(format_size $filesize))"
                 echo "    CID: $cid"
-                ((FILES_PASSED++))
+                FILES_PASSED=$((FILES_PASSED + 1))
                 PASSED_ITEMS+=("$filename -> $cid")
             else
                 echo -e "  ${RED}✗${NC} $filename - FAILED"
                 echo "    Error: $cid"
-                ((FILES_FAILED++))
+                FILES_FAILED=$((FILES_FAILED + 1))
                 FAILED_ITEMS+=("$filename: $cid")
             fi
 
@@ -142,28 +164,29 @@ for file in "$FIXTURES_DIR"/*; do
             if [ "$filesize" -gt "$MAX_BLOCK_SIZE" ]; then
                 echo -e "  ${YELLOW}⊘${NC} $filename - SKIPPED ($(format_size $filesize) > 1MB limit)"
                 echo "    File too large for single block transfer via bitswap"
-                ((FILES_SKIPPED_SIZE++))
+                FILES_SKIPPED_SIZE=$((FILES_SKIPPED_SIZE + 1))
                 SKIPPED_SIZE_ITEMS+=("$filename ($(format_size $filesize))")
                 continue
             fi
 
             # JS files: blake2b-256 hash + raw codec (0x0055)
             cid=$(ipfs block put --pin --mhtype=blake2b-256 --cid-codec=raw "$file" 2>&1)
+            exit_code=$?
 
-            if [ $? -eq 0 ]; then
+            if [ $exit_code -eq 0 ]; then
                 echo -e "  ${GREEN}✓${NC} $filename (raw + blake2b-256, $(format_size $filesize))"
                 echo "    CID: $cid"
-                ((FILES_PASSED++))
+                FILES_PASSED=$((FILES_PASSED + 1))
                 PASSED_ITEMS+=("$filename -> $cid")
             else
                 echo -e "  ${RED}✗${NC} $filename - FAILED"
                 echo "    Error: $cid"
-                ((FILES_FAILED++))
+                FILES_FAILED=$((FILES_FAILED + 1))
                 FAILED_ITEMS+=("$filename: $cid")
             fi
         else
             echo -e "  ${YELLOW}–${NC} $filename - SKIPPED (not .json or .js)"
-            ((FILES_SKIPPED_EXT++))
+            FILES_SKIPPED_EXT=$((FILES_SKIPPED_EXT + 1))
             SKIPPED_EXT_ITEMS+=("$filename")
         fi
     fi
@@ -186,8 +209,9 @@ for dir in "$FIXTURES_DIR"/*; do
         # Add directory recursively with UnixFS (standard ipfs add)
         # This matches the unixFS.addAll() behavior in fixtures.ts
         result=$(ipfs add -r -Q --pin "$dir" 2>&1)
+        exit_code=$?
 
-        if [ $? -eq 0 ]; then
+        if [ $exit_code -eq 0 ]; then
             cid="$result"
             echo -e "  ${GREEN}✓${NC} $dirname/ (UnixFS dag-pb + sha2-256)"
             echo "    CID: $cid"
@@ -199,15 +223,16 @@ for dir in "$FIXTURES_DIR"/*; do
             done
             file_count=$(ipfs ls "$cid" 2>/dev/null | wc -l | tr -d ' ')
             if [ "$file_count" -gt 5 ]; then
-                echo "      ... and $((file_count - 5)) more files"
+                remaining=$((file_count - 5))
+                echo "      ... and $remaining more files"
             fi
 
-            ((DIRS_PASSED++))
+            DIRS_PASSED=$((DIRS_PASSED + 1))
             PASSED_ITEMS+=("$dirname/ -> $cid")
         else
             echo -e "  ${RED}✗${NC} $dirname/ - FAILED"
             echo "    Error: $result"
-            ((DIRS_FAILED++))
+            DIRS_FAILED=$((DIRS_FAILED + 1))
             FAILED_ITEMS+=("$dirname/: $result")
         fi
     fi
