@@ -1,7 +1,12 @@
 #!/bin/bash
 
 # Upload and pin fixtures to local Kubo IPFS node
-# Usage: ./upload-fixtures.sh [fixtures_directory]
+# Usage: ./upload-fixtures.sh [fixtures_directory] [--verify-only]
+#
+# Modes:
+#   ./upload-fixtures.sh              - Upload and pin all fixtures
+#   ./upload-fixtures.sh --verify     - Verify existing pins from manifest
+#   ./upload-fixtures.sh --diagnose   - Show detailed IPFS node diagnostics
 #
 # IMPORTANT: This script preserves the exact CID generation logic from fixtures.ts:
 #   - Individual .json files: blake2b-256 hash + json codec (0x0200)
@@ -11,12 +16,40 @@
 # Prerequisites:
 #   - Local Kubo node running (ipfs daemon)
 #   - ipfs CLI available in PATH
+#
+# Manifest File:
+#   Creates .ipfs-pins-manifest.txt to track all pinned CIDs
 
 # Don't use set -e as we handle errors manually
 
 # Default fixtures directory (relative to script location)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FIXTURES_DIR="${1:-$SCRIPT_DIR/fixtures}"
+MANIFEST_FILE="$SCRIPT_DIR/.ipfs-pins-manifest.txt"
+
+# Parse arguments
+MODE="upload"
+FIXTURES_DIR=""
+
+for arg in "$@"; do
+    case $arg in
+        --verify)
+            MODE="verify"
+            shift
+            ;;
+        --diagnose)
+            MODE="diagnose"
+            shift
+            ;;
+        *)
+            if [ -z "$FIXTURES_DIR" ]; then
+                FIXTURES_DIR="$arg"
+            fi
+            ;;
+    esac
+done
+
+# Set default fixtures dir if not provided
+FIXTURES_DIR="${FIXTURES_DIR:-$SCRIPT_DIR/fixtures}"
 
 # Max block size for standard bitswap (1MB)
 MAX_BLOCK_SIZE=1048576
@@ -42,6 +75,186 @@ declare -a PASSED_ITEMS=()
 declare -a FAILED_ITEMS=()
 declare -a SKIPPED_SIZE_ITEMS=()
 declare -a SKIPPED_EXT_ITEMS=()
+declare -a PINNED_CIDS=()  # Track CIDs for manifest
+
+# Helper function to verify a pin exists and is accessible
+verify_pin() {
+    local cid="$1"
+    local item_name="$2"
+    
+    # Check if pin exists
+    if ! ipfs pin ls --type=recursive 2>/dev/null | grep -q "^$cid"; then
+        echo -e "  ${RED}✗ CRITICAL${NC} $item_name ($cid) - PIN MISSING!"
+        return 1
+    fi
+    
+    # Try to stat the CID (ensures it's actually retrievable)
+    if ! ipfs block stat "$cid" &>/dev/null; then
+        echo -e "  ${RED}✗ CRITICAL${NC} $item_name ($cid) - BLOCK INACCESSIBLE!"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Helper function to save CID to manifest
+save_to_manifest() {
+    local cid="$1"
+    local item_name="$2"
+    local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    echo "$timestamp|$cid|$item_name" >> "$MANIFEST_FILE"
+    PINNED_CIDS+=("$cid|$item_name")
+}
+
+# Diagnostic mode function
+run_diagnostics() {
+    echo "=========================================="
+    echo "IPFS Node Diagnostics"
+    echo "=========================================="
+    echo ""
+    
+    # IPFS version and config
+    echo -e "${CYAN}IPFS Version:${NC}"
+    ipfs version --all 2>/dev/null || ipfs version
+    echo ""
+    
+    # Repository info
+    echo -e "${CYAN}Repository Path:${NC}"
+    ipfs config show 2>/dev/null | grep "IPFS_PATH" || echo "$IPFS_PATH"
+    echo ""
+    
+    # Repo stats
+    echo -e "${CYAN}Repository Stats:${NC}"
+    ipfs repo stat 2>/dev/null
+    echo ""
+    
+    # Pin stats
+    echo -e "${CYAN}Pin Statistics:${NC}"
+    local recursive_pins=$(ipfs pin ls --type=recursive 2>/dev/null | wc -l | tr -d ' ')
+    local direct_pins=$(ipfs pin ls --type=direct 2>/dev/null | wc -l | tr -d ' ')
+    local indirect_pins=$(ipfs pin ls --type=indirect 2>/dev/null | wc -l | tr -d ' ')
+    echo "  Recursive pins: $recursive_pins"
+    echo "  Direct pins:    $direct_pins"
+    echo "  Indirect pins:  $indirect_pins"
+    echo ""
+    
+    # GC status
+    echo -e "${CYAN}Garbage Collection:${NC}"
+    ipfs config Datastore.GCPeriod 2>/dev/null || echo "  (default settings)"
+    echo ""
+    
+    # Check manifest
+    if [ -f "$MANIFEST_FILE" ]; then
+        echo -e "${CYAN}Manifest File Found:${NC} $MANIFEST_FILE"
+        local manifest_count=$(wc -l < "$MANIFEST_FILE" | tr -d ' ')
+        echo "  Entries: $manifest_count"
+        echo ""
+        
+        echo "Verifying manifest pins..."
+        local missing=0
+        while IFS='|' read -r timestamp cid item_name; do
+            if ipfs pin ls --type=recursive 2>/dev/null | grep -q "^$cid"; then
+                echo -e "  ${GREEN}✓${NC} $item_name ($cid)"
+            else
+                echo -e "  ${RED}✗ MISSING${NC} $item_name ($cid)"
+                missing=$((missing + 1))
+            fi
+        done < "$MANIFEST_FILE"
+        
+        echo ""
+        if [ $missing -eq 0 ]; then
+            echo -e "${GREEN}${BOLD}All manifest pins verified!${NC}"
+        else
+            echo -e "${RED}${BOLD}WARNING: $missing pins are missing!${NC}"
+            echo "Consider re-uploading fixtures."
+        fi
+    else
+        echo -e "${YELLOW}No manifest file found${NC}"
+        echo "Run upload mode to create manifest"
+    fi
+    
+    echo ""
+    echo "=========================================="
+    exit 0
+}
+
+# Verify-only mode function
+run_verify() {
+    echo "=========================================="
+    echo "Verifying Pinned Fixtures"
+    echo "=========================================="
+    echo ""
+    
+    if [ ! -f "$MANIFEST_FILE" ]; then
+        echo -e "${RED}Error: Manifest file not found: $MANIFEST_FILE${NC}"
+        echo "Run upload mode first to create manifest"
+        exit 1
+    fi
+    
+    echo "Reading manifest: $MANIFEST_FILE"
+    echo ""
+    
+    local total=0
+    local verified=0
+    local missing=0
+    
+    while IFS='|' read -r timestamp cid item_name; do
+        total=$((total + 1))
+        if verify_pin "$cid" "$item_name"; then
+            echo -e "  ${GREEN}✓${NC} $item_name"
+            verified=$((verified + 1))
+        else
+            missing=$((missing + 1))
+        fi
+    done < "$MANIFEST_FILE"
+    
+    echo ""
+    echo "=========================================="
+    echo -e "${BOLD}Verification Summary${NC}"
+    echo "=========================================="
+    echo -e "  ${GREEN}Verified:${NC} $verified"
+    echo -e "  ${RED}Missing:${NC}  $missing"
+    echo "  Total:    $total"
+    echo ""
+    
+    if [ $missing -gt 0 ]; then
+        echo -e "${RED}${BOLD}WARNING: Some pins are missing!${NC}"
+        echo "Possible causes:"
+        echo "  - IPFS repo was garbage collected"
+        echo "  - Different IPFS instance (check IPFS_PATH)"
+        echo "  - Datastore corruption"
+        echo ""
+        echo "Run with --diagnose for detailed node info"
+        exit 1
+    else
+        echo -e "${GREEN}${BOLD}All pins verified successfully!${NC}"
+    fi
+    
+    exit 0
+}
+
+# Helper function to format file size (no bc dependency)
+format_size() {
+    local size=$1
+    if [ "$size" -ge 1048576 ]; then
+        echo "$((size / 1048576))MB"
+    elif [ "$size" -ge 1024 ]; then
+        echo "$((size / 1024))KB"
+    else
+        echo "${size}B"
+    fi
+}
+
+# Handle special modes
+if [ "$MODE" = "diagnose" ]; then
+    run_diagnostics
+elif [ "$MODE" = "verify" ]; then
+    run_verify
+fi
+
+# ========================================
+# UPLOAD MODE (default)
+# ========================================
 
 echo "=========================================="
 echo "IPFS Fixture Uploader for Kubo"
@@ -54,6 +267,13 @@ echo "  directories → UnixFS (dag-pb + sha2-256)"
 echo ""
 echo -e "${CYAN}Block size limit:${NC} 1MB (files larger will be skipped)"
 echo ""
+echo -e "${GREEN}${BOLD}All content will be PINNED (permanent storage)${NC}"
+echo -e "${CYAN}Manifest file:${NC} $MANIFEST_FILE"
+echo ""
+
+# Initialize/clear manifest file
+echo "# IPFS Pins Manifest - Generated $(date)" > "$MANIFEST_FILE"
+echo "# Format: timestamp|CID|item_name" >> "$MANIFEST_FILE"
 
 # Check if ipfs CLI is available
 if ! command -v ipfs &> /dev/null; then
@@ -80,8 +300,17 @@ echo ""
 if [ ! -d "$FIXTURES_DIR" ]; then
     echo -e "${RED}Error: Fixtures directory not found: $FIXTURES_DIR${NC}"
     echo ""
-    echo "Usage: $0 [fixtures_directory]"
-    echo "  Default: ./fixtures"
+    echo "Usage: $0 [fixtures_directory] [--verify|--diagnose]"
+    echo ""
+    echo "Modes:"
+    echo "  $0                    - Upload and pin all fixtures (default)"
+    echo "  $0 --verify           - Verify existing pins from manifest"
+    echo "  $0 --diagnose         - Show detailed IPFS node diagnostics"
+    echo ""
+    echo "Examples:"
+    echo "  $0                    # Upload from ./fixtures"
+    echo "  $0 /path/to/fixtures  # Upload from custom path"
+    echo "  $0 --verify           # Check if all pins still exist"
     exit 1
 fi
 
@@ -148,10 +377,19 @@ for file in "$FIXTURES_DIR"/*; do
             exit_code=$?
 
             if [ $exit_code -eq 0 ]; then
-                echo -e "  ${GREEN}✓${NC} $filename (json + blake2b-256, $(format_size $filesize))"
-                echo "    CID: $cid"
-                FILES_PASSED=$((FILES_PASSED + 1))
-                PASSED_ITEMS+=("$filename -> $cid")
+                # Verify the pin was actually created
+                if verify_pin "$cid" "$filename"; then
+                    echo -e "  ${GREEN}✓${NC} $filename (json + blake2b-256, $(format_size $filesize)) ${GREEN}[PINNED✓]${NC}"
+                    echo "    CID: $cid"
+                    save_to_manifest "$cid" "$filename"
+                    FILES_PASSED=$((FILES_PASSED + 1))
+                    PASSED_ITEMS+=("$filename -> $cid")
+                else
+                    echo -e "  ${RED}✗${NC} $filename - PIN VERIFICATION FAILED"
+                    echo "    CID: $cid (uploaded but NOT pinned!)"
+                    FILES_FAILED=$((FILES_FAILED + 1))
+                    FAILED_ITEMS+=("$filename: pin verification failed")
+                fi
             else
                 echo -e "  ${RED}✗${NC} $filename - FAILED"
                 echo "    Error: $cid"
@@ -174,10 +412,19 @@ for file in "$FIXTURES_DIR"/*; do
             exit_code=$?
 
             if [ $exit_code -eq 0 ]; then
-                echo -e "  ${GREEN}✓${NC} $filename (raw + blake2b-256, $(format_size $filesize))"
-                echo "    CID: $cid"
-                FILES_PASSED=$((FILES_PASSED + 1))
-                PASSED_ITEMS+=("$filename -> $cid")
+                # Verify the pin was actually created
+                if verify_pin "$cid" "$filename"; then
+                    echo -e "  ${GREEN}✓${NC} $filename (raw + blake2b-256, $(format_size $filesize)) ${GREEN}[PINNED✓]${NC}"
+                    echo "    CID: $cid"
+                    save_to_manifest "$cid" "$filename"
+                    FILES_PASSED=$((FILES_PASSED + 1))
+                    PASSED_ITEMS+=("$filename -> $cid")
+                else
+                    echo -e "  ${RED}✗${NC} $filename - PIN VERIFICATION FAILED"
+                    echo "    CID: $cid (uploaded but NOT pinned!)"
+                    FILES_FAILED=$((FILES_FAILED + 1))
+                    FAILED_ITEMS+=("$filename: pin verification failed")
+                fi
             else
                 echo -e "  ${RED}✗${NC} $filename - FAILED"
                 echo "    Error: $cid"
@@ -213,22 +460,31 @@ for dir in "$FIXTURES_DIR"/*; do
 
         if [ $exit_code -eq 0 ]; then
             cid="$result"
-            echo -e "  ${GREEN}✓${NC} $dirname/ (UnixFS dag-pb + sha2-256)"
-            echo "    CID: $cid"
+            # Verify the pin was actually created
+            if verify_pin "$cid" "$dirname/"; then
+                echo -e "  ${GREEN}✓${NC} $dirname/ (UnixFS dag-pb + sha2-256) ${GREEN}[PINNED✓]${NC}"
+                echo "    CID: $cid"
 
-            # List contents (first few files)
-            echo "    Contents:"
-            ipfs ls "$cid" 2>/dev/null | head -5 | while read -r line; do
-                echo "      - $line"
-            done
-            file_count=$(ipfs ls "$cid" 2>/dev/null | wc -l | tr -d ' ')
-            if [ "$file_count" -gt 5 ]; then
-                remaining=$((file_count - 5))
-                echo "      ... and $remaining more files"
+                # List contents (first few files)
+                echo "    Contents:"
+                ipfs ls "$cid" 2>/dev/null | head -5 | while read -r line; do
+                    echo "      - $line"
+                done
+                file_count=$(ipfs ls "$cid" 2>/dev/null | wc -l | tr -d ' ')
+                if [ "$file_count" -gt 5 ]; then
+                    remaining=$((file_count - 5))
+                    echo "      ... and $remaining more files"
+                fi
+
+                save_to_manifest "$cid" "$dirname/"
+                DIRS_PASSED=$((DIRS_PASSED + 1))
+                PASSED_ITEMS+=("$dirname/ -> $cid")
+            else
+                echo -e "  ${RED}✗${NC} $dirname/ - PIN VERIFICATION FAILED"
+                echo "    CID: $cid (uploaded but NOT pinned!)"
+                DIRS_FAILED=$((DIRS_FAILED + 1))
+                FAILED_ITEMS+=("$dirname/: pin verification failed")
             fi
-
-            DIRS_PASSED=$((DIRS_PASSED + 1))
-            PASSED_ITEMS+=("$dirname/ -> $cid")
         else
             echo -e "  ${RED}✗${NC} $dirname/ - FAILED"
             echo "    Error: $result"
@@ -243,6 +499,31 @@ TOTAL_PASSED=$((FILES_PASSED + DIRS_PASSED))
 TOTAL_FAILED=$((FILES_FAILED + DIRS_FAILED))
 TOTAL_SKIPPED=$((FILES_SKIPPED_SIZE + FILES_SKIPPED_EXT))
 TOTAL=$((TOTAL_PASSED + TOTAL_FAILED + TOTAL_SKIPPED))
+
+# Verify pins (only if we have successfully uploaded items)
+if [ $TOTAL_PASSED -gt 0 ]; then
+    echo ""
+    echo "Verifying pins:"
+    echo "---------------"
+    
+    # Count recursive pins (these are the ones we care about)
+    pin_count=$(ipfs pin ls --type=recursive 2>/dev/null | wc -l | tr -d ' ')
+    
+    if [ -n "$pin_count" ] && [ "$pin_count" -gt 0 ]; then
+        echo -e "  ${GREEN}✓${NC} Found $pin_count pinned items (recursive pins)"
+        echo ""
+        echo "  Sample of pinned CIDs:"
+        ipfs pin ls --type=recursive 2>/dev/null | head -5 | while read -r cid pin_type; do
+            echo "    📌 $cid"
+        done
+        if [ "$pin_count" -gt 5 ]; then
+            remaining=$((pin_count - 5))
+            echo "    ... and $remaining more"
+        fi
+    else
+        echo -e "  ${YELLOW}⚠${NC} No recursive pins found (unexpected)"
+    fi
+fi
 
 echo ""
 echo "=========================================="
@@ -289,11 +570,29 @@ fi
 
 echo ""
 echo "=========================================="
-echo "Verification commands:"
-echo "  List pins:        ipfs pin ls --type=recursive"
+echo "Pin Management & Verification:"
+echo "  Verify all pins:  ./upload-fixtures.sh --verify"
+echo "  Check node info:  ./upload-fixtures.sh --diagnose"
+echo "  List all pins:    ipfs pin ls --type=recursive"
+echo "  Verify pin:       ipfs pin verify <CID>"
+echo "  Unpin (if needed): ipfs pin rm <CID>"
+echo ""
+echo "Content Access:"
 echo "  Get block:        ipfs block get <CID>"
 echo "  Cat content:      ipfs cat <CID>"
 echo "  Via gateway:      http://localhost:8080/ipfs/<CID>"
+echo ""
+echo -e "${GREEN}${BOLD}Manifest saved:${NC} $MANIFEST_FILE"
+echo -e "  ${CYAN}→${NC} Contains all CIDs for verification"
+echo -e "  ${CYAN}→${NC} Run ${BOLD}--verify${NC} to check if pins still exist"
+echo ""
+echo -e "${GREEN}${BOLD}Note:${NC} All uploaded content is ${BOLD}PINNED${NC} and will ${BOLD}NOT${NC} be"
+echo "      garbage collected. Your fixtures are permanently stored!"
+echo ""
+echo -e "${YELLOW}${BOLD}Protect your data:${NC}"
+echo "  - Backup manifest file to track your pins"
+echo "  - Run ${BOLD}--verify${NC} regularly to ensure pins exist"
+echo "  - Disable auto-GC: ipfs config Datastore.GCPeriod 0"
 echo "=========================================="
 
 # Exit with error code if there were failures
